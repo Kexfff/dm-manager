@@ -3,9 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dmm_sys::network::{
-    self, ActiveNetwork, Event, KnownNetwork, Network, Request, Security, WifiState,
-};
+use dmm_sys::network::{self, ActiveNetwork, Event, KnownNetwork, Network, Request, Security, WifiState};
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 use tokio::sync::mpsc::UnboundedSender;
@@ -78,9 +76,8 @@ impl Component for WifiPage {
         });
 
         let s = sender.clone();
-        let hero = Hero::new("dmm-network-wireless-symbolic", "Wi-Fi", move |on| {
-            s.input(Input::Toggle(on))
-        });
+        let hero =
+            Hero::new("dmm-network-wireless-symbolic", "Wi-Fi").with_switch(move |on| s.input(Input::Toggle(on)));
         let hero_group = adw::PreferencesGroup::new();
         hero_group.add(&hero.root);
 
@@ -89,9 +86,7 @@ impl Component for WifiPage {
         off_group.add(&off.root);
 
         let current = CurrentRow::new(&sender);
-        let current_group = adw::PreferencesGroup::builder()
-            .title("Current Network")
-            .build();
+        let current_group = adw::PreferencesGroup::builder().title("Current Network").build();
         current_group.add(&current.list);
 
         let scan_button = gtk::Button::builder()
@@ -102,17 +97,12 @@ impl Component for WifiPage {
             .build();
         let s = sender.clone();
         scan_button.connect_clicked(move |_| s.input(Input::Scan));
-        let scan_stack = gtk::Stack::builder()
-            .transition_type(gtk::StackTransitionType::Crossfade)
-            .build();
+        let scan_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
         scan_stack.add_named(&scan_button, Some("button"));
         scan_stack.add_named(&adw::Spinner::new(), Some("spinner"));
 
         let available = KeyedList::new(Some("No networks in range"));
-        let available_group = adw::PreferencesGroup::builder()
-            .title("Networks")
-            .header_suffix(&scan_stack)
-            .build();
+        let available_group = adw::PreferencesGroup::builder().title("Networks").header_suffix(&scan_stack).build();
         available_group.add(&available.list);
 
         let known = KeyedList::new(None);
@@ -128,13 +118,7 @@ impl Component for WifiPage {
         root.add(&available_group);
         root.add(&known_group);
 
-        let model = Self {
-            tx,
-            state: WifiState::default(),
-            scanning: false,
-            connecting: None,
-            visible: false,
-        };
+        let model = Self { tx, state: WifiState::default(), scanning: false, connecting: None, visible: false };
         let mut widgets = Widgets {
             hero,
             off_group,
@@ -168,10 +152,7 @@ impl Component for WifiPage {
                 if net.active || self.connecting.as_deref() == Some(ssid.as_str()) {
                     return;
                 }
-                self.send(Request::Connect {
-                    ssid,
-                    password: None,
-                });
+                self.send(Request::Connect { ssid, password: None });
             }
             Input::Disconnect => self.send(Request::Disconnect),
             Input::ConfirmForget(ssid) => {
@@ -186,10 +167,7 @@ impl Component for WifiPage {
                 );
             }
             Input::Forget(ssid) => self.send(Request::Forget(ssid)),
-            Input::Password { ssid, password } => self.send(Request::Connect {
-                ssid,
-                password: Some(password),
-            }),
+            Input::Password { ssid, password } => self.send(Request::Connect { ssid, password: Some(password) }),
         }
     }
 
@@ -208,11 +186,7 @@ impl Component for WifiPage {
                 self.connecting = None;
                 toast(&sender, format!("Connected to “{ssid}”"));
             }
-            Event::PasswordNeeded {
-                ssid,
-                security,
-                wrong,
-            } => {
+            Event::PasswordNeeded { ssid, security, wrong } => {
                 self.connecting = None;
                 password_dialog(root, &sender, ssid, security, wrong);
             }
@@ -258,17 +232,9 @@ impl Component for WifiPage {
                 "Wi-Fi settings need NetworkManager. Start it with “systemctl enable --now NetworkManager”.",
             );
         } else if st.interface.is_none() {
-            w.off.set(
-                "dmm-network-wireless-disabled-symbolic",
-                "No Wi-Fi adapter",
-                "No wireless device was found.",
-            );
+            w.off.set("dmm-network-wireless-disabled-symbolic", "No Wi-Fi adapter", "No wireless device was found.");
         } else {
-            w.off.set(
-                "dmm-network-wireless-disabled-symbolic",
-                "Wi-Fi is off",
-                "Turn it on to see networks nearby.",
-            );
+            w.off.set("dmm-network-wireless-disabled-symbolic", "Wi-Fi is off", "Turn it on to see networks nearby.");
         }
 
         w.current_group.set_visible(on && st.active.is_some());
@@ -277,8 +243,7 @@ impl Component for WifiPage {
         }
 
         w.available_group.set_visible(on);
-        w.scan_stack
-            .set_visible_child_name(if self.scanning { "spinner" } else { "button" });
+        w.scan_stack.set_visible_child_name(if self.scanning { "spinner" } else { "button" });
         let networks = st
             .networks
             .iter()
@@ -288,14 +253,9 @@ impl Component for WifiPage {
                 (n.ssid.clone(), (n.clone(), connecting))
             })
             .collect();
-        w.available
-            .sync(networks, |ssid| NetworkRow::new(ssid, &sender));
+        w.available.sync(networks, |ssid| NetworkRow::new(ssid, &sender));
 
-        let known = st
-            .known
-            .iter()
-            .map(|k| (format!("{}\n{}", k.ssid, k.name), k.clone()))
-            .collect();
+        let known = st.known.iter().map(|k| (format!("{}\n{}", k.ssid, k.name), k.clone())).collect();
         w.known.sync(known, |_| KnownRow::new(&sender));
         w.known_group.set_visible(on && !w.known.is_empty());
     }
@@ -340,19 +300,13 @@ impl CurrentRow {
         icon.add_css_class("accent");
         row.add_prefix(&icon);
 
-        let disconnect = gtk::Button::builder()
-            .label("Disconnect")
-            .valign(gtk::Align::Center)
-            .build();
+        let disconnect = gtk::Button::builder().label("Disconnect").valign(gtk::Align::Center).build();
         let s = sender.clone();
         disconnect.connect_clicked(move |_| s.input(Input::Disconnect));
         row.add_suffix(&disconnect);
 
         let detail = |title: &str| {
-            let label = gtk::Label::builder()
-                .selectable(true)
-                .css_classes(["value-label"])
-                .build();
+            let label = gtk::Label::builder().selectable(true).css_classes(["value-label"]).build();
             let r = adw::ActionRow::builder().title(title).build();
             r.add_suffix(&label);
             row.add_row(&r);
@@ -365,56 +319,27 @@ impl CurrentRow {
         let speed = detail("Link Speed");
 
         let ssid = Rc::new(RefCell::new(String::new()));
-        let forget = adw::ButtonRow::builder()
-            .title("Forget This Network")
-            .css_classes(["destructive-action"])
-            .build();
+        let forget = adw::ButtonRow::builder().title("Forget This Network").css_classes(["destructive-action"]).build();
         let (s, current) = (sender.clone(), ssid.clone());
         forget.connect_activated(move |_| s.input(Input::ConfirmForget(current.borrow().clone())));
         row.add_row(&forget);
 
-        let list = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::None)
-            .css_classes(["boxed-list"])
-            .build();
+        let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         list.append(&row);
-        Self {
-            list,
-            row,
-            icon,
-            ssid,
-            ip,
-            gateway,
-            security,
-            band,
-            speed,
-        }
+        Self { list, row, icon, ssid, ip, gateway, security, band, speed }
     }
 
     fn update(&self, a: &ActiveNetwork) {
         self.ssid.replace(a.ssid.clone());
         self.row.set_title(&a.ssid);
-        self.row.set_subtitle(if a.connected {
-            "Connected"
-        } else {
-            "Connecting…"
-        });
+        self.row.set_subtitle(if a.connected { "Connected" } else { "Connecting…" });
         self.icon.set_icon_name(Some(signal_icon(a.strength)));
         let dash = || "—".to_string();
         self.ip.set_label(&a.ipv4.clone().unwrap_or_else(dash));
-        self.gateway
-            .set_label(&a.gateway.clone().unwrap_or_else(dash));
+        self.gateway.set_label(&a.gateway.clone().unwrap_or_else(dash));
         self.security.set_label(a.security.label());
-        self.band.set_label(&format!(
-            "{} · {} MHz",
-            network::band(a.frequency),
-            a.frequency
-        ));
-        self.speed.set_label(&if a.bitrate > 0 {
-            format!("{} Mb/s", a.bitrate)
-        } else {
-            dash()
-        });
+        self.band.set_label(&format!("{} · {} MHz", network::band(a.frequency), a.frequency));
+        self.speed.set_label(&if a.bitrate > 0 { format!("{} Mb/s", a.bitrate) } else { dash() });
     }
 }
 
@@ -427,28 +352,16 @@ struct NetworkRow {
 
 impl NetworkRow {
     fn new(ssid: &str, sender: &ComponentSender<WifiPage>) -> Self {
-        let row = adw::ActionRow::builder()
-            .title(ssid)
-            .use_markup(false)
-            .activatable(true)
-            .build();
+        let row = adw::ActionRow::builder().title(ssid).use_markup(false).activatable(true).build();
         let icon = tile("dmm-network-wireless-signal-good-symbolic");
         row.add_prefix(&icon);
         let spinner = adw::Spinner::builder().visible(false).build();
-        let lock = gtk::Image::builder()
-            .icon_name("dmm-channel-secure-symbolic")
-            .css_classes(["dim-label"])
-            .build();
+        let lock = gtk::Image::builder().icon_name("dmm-channel-secure-symbolic").css_classes(["dim-label"]).build();
         row.add_suffix(&spinner);
         row.add_suffix(&lock);
         let (s, ssid) = (sender.clone(), ssid.to_string());
         row.connect_activated(move |_| s.input(Input::Activate(ssid.clone())));
-        Self {
-            row,
-            icon,
-            lock,
-            spinner,
-        }
+        Self { row, icon, lock, spinner }
     }
 }
 
@@ -511,8 +424,7 @@ impl KeyedRow for KnownRow {
     fn update(&self, k: &KnownNetwork) {
         self.ssid.replace(k.ssid.clone());
         self.row.set_title(&k.ssid);
-        self.row
-            .set_subtitle(if k.name != k.ssid { &k.name } else { "" });
+        self.row.set_subtitle(if k.name != k.ssid { &k.name } else { "" });
     }
 }
 
@@ -536,27 +448,17 @@ fn password_dialog(
     dialog.set_response_enabled("connect", false);
 
     let entry = adw::PasswordEntryRow::builder().title("Password").build();
-    let list = gtk::ListBox::builder()
-        .selection_mode(gtk::SelectionMode::None)
-        .css_classes(["boxed-list"])
-        .build();
+    let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
     list.append(&entry);
     dialog.set_extra_child(Some(&list));
 
     let min = security.min_password_len();
     let d = dialog.clone();
-    entry.connect_changed(move |e| {
-        d.set_response_enabled("connect", e.text().chars().count() >= min)
-    });
+    entry.connect_changed(move |e| d.set_response_enabled("connect", e.text().chars().count() >= min));
 
     let submit = {
         let (s, ssid) = (sender.clone(), ssid.clone());
-        move |password: String| {
-            s.input(Input::Password {
-                ssid: ssid.clone(),
-                password,
-            })
-        }
+        move |password: String| s.input(Input::Password { ssid: ssid.clone(), password })
     };
     let (d, on_enter) = (dialog.clone(), submit.clone());
     entry.connect_entry_activated(move |e| {

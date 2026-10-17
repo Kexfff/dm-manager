@@ -201,27 +201,18 @@ pub enum Event {
     Error(String),
 }
 
-pub async fn run(
-    mut requests: UnboundedReceiver<Request>,
-    emit: impl Fn(Event) + Send + Sync + 'static,
-) {
+pub async fn run(mut requests: UnboundedReceiver<Request>, emit: impl Fn(Event) + Send + Sync + 'static) {
     let emit: Emit<Event> = Arc::new(emit);
     let conn = match Connection::system().await {
         Ok(conn) => conn,
         Err(e) => {
             emit(Event::State(WifiState::default()));
-            emit(Event::Error(format!(
-                "No system bus: {}",
-                describe_error(&e)
-            )));
+            emit(Event::Error(format!("No system bus: {}", describe_error(&e))));
             while requests.recv().await.is_some() {}
             return;
         }
     };
-    let nm = Nm {
-        bus: Bus::new(conn, SERVICE),
-        emit: emit.clone(),
-    };
+    let nm = Nm { bus: Bus::new(conn, SERVICE), emit: emit.clone() };
 
     let mut signals = match nm.bus.signals().await {
         Ok(s) => Some(s),
@@ -312,10 +303,7 @@ impl Nm {
         match req {
             Request::SetEnabled(on) => {
                 tokio::spawn(async move {
-                    if let Err(e) = bus
-                        .set(NM_PATH, NM_IFACE, "WirelessEnabled", Value::from(on))
-                        .await
-                    {
+                    if let Err(e) = bus.set(NM_PATH, NM_IFACE, "WirelessEnabled", Value::from(on)).await {
                         emit(Event::Error(format!(
                             "Couldn't turn Wi-Fi {}: {}",
                             if on { "on" } else { "off" },
@@ -332,10 +320,7 @@ impl Nm {
             Request::Connect { ssid, password } => {
                 let Some(device) = device else { return };
                 let Some(net) = state.networks.iter().find(|n| n.ssid == ssid) else {
-                    emit(Event::Failed {
-                        ssid,
-                        message: "The network is out of range".into(),
-                    });
+                    emit(Event::Failed { ssid, message: "The network is out of range".into() });
                     return;
                 };
                 let target = Target {
@@ -351,10 +336,7 @@ impl Nm {
                 let Some(device) = device else { return };
                 tokio::spawn(async move {
                     if let Err(e) = bus.invoke(&device, DEVICE_IFACE, "Disconnect", &()).await {
-                        emit(Event::Error(format!(
-                            "Couldn't disconnect: {}",
-                            describe_error(&e)
-                        )));
+                        emit(Event::Error(format!("Couldn't disconnect: {}", describe_error(&e))));
                     }
                 });
             }
@@ -363,10 +345,7 @@ impl Nm {
                 tokio::spawn(async move {
                     for path in profiles {
                         if let Err(e) = bus.invoke(&path, CONNECTION_IFACE, "Delete", &()).await {
-                            emit(Event::Error(format!(
-                                "Couldn't forget “{ssid}”: {}",
-                                describe_error(&e)
-                            )));
+                            emit(Event::Error(format!("Couldn't forget “{ssid}”: {}", describe_error(&e))));
                         }
                     }
                 });
@@ -375,21 +354,18 @@ impl Nm {
     }
 
     async fn known(&self) -> Vec<KnownNetwork> {
-        let Ok(paths) = self
-            .bus
-            .call::<_, Vec<OwnedObjectPath>>(SETTINGS_PATH, SETTINGS_IFACE, "ListConnections", &())
-            .await
+        let Ok(paths) =
+            self.bus.call::<_, Vec<OwnedObjectPath>>(SETTINGS_PATH, SETTINGS_IFACE, "ListConnections", &()).await
         else {
             return Vec::new();
         };
         let settings = join_all(paths.iter().map(|p| {
-            self.bus
-                .call::<_, HashMap<String, HashMap<String, OwnedValue>>>(
-                    p.as_str(),
-                    CONNECTION_IFACE,
-                    "GetSettings",
-                    &(),
-                )
+            self.bus.call::<_, HashMap<String, HashMap<String, OwnedValue>>>(
+                p.as_str(),
+                CONNECTION_IFACE,
+                "GetSettings",
+                &(),
+            )
         }))
         .await;
 
@@ -405,8 +381,7 @@ impl Nm {
             if wifi.str("mode").as_deref() == Some("ap") {
                 continue;
             }
-            let ssid =
-                String::from_utf8_lossy(&wifi.bytes("ssid").unwrap_or_default()).into_owned();
+            let ssid = String::from_utf8_lossy(&wifi.bytes("ssid").unwrap_or_default()).into_owned();
             if ssid.is_empty() {
                 continue;
             }
@@ -437,8 +412,7 @@ impl Nm {
             ..Default::default()
         };
 
-        let devices: Vec<OwnedObjectPath> =
-            self.bus.call(NM_PATH, NM_IFACE, "GetDevices", &()).await?;
+        let devices: Vec<OwnedObjectPath> = self.bus.call(NM_PATH, NM_IFACE, "GetDevices", &()).await?;
         let mut wifi = None;
         for path in devices {
             let props = self.bus.props(path.as_str(), DEVICE_IFACE).await?;
@@ -455,11 +429,8 @@ impl Nm {
         let active_ap = wireless.str("ActiveAccessPoint").filter(|p| p != "/");
         let device_state = dev.u32("State").unwrap_or(0);
 
-        let aps: Vec<OwnedObjectPath> = self
-            .bus
-            .call(&device, WIRELESS_IFACE, "GetAllAccessPoints", &())
-            .await
-            .unwrap_or_default();
+        let aps: Vec<OwnedObjectPath> =
+            self.bus.call(&device, WIRELESS_IFACE, "GetAllAccessPoints", &()).await.unwrap_or_default();
         let props = join_all(aps.iter().map(|ap| self.bus.props(ap.as_str(), AP_IFACE))).await;
         let known_ssids: HashSet<&str> = known.iter().map(|k| k.ssid.as_str()).collect();
 
@@ -529,12 +500,7 @@ impl Nm {
 }
 
 fn profiles_for(state: &WifiState, ssid: &str) -> Vec<String> {
-    state
-        .known
-        .iter()
-        .filter(|k| k.ssid == ssid)
-        .map(|k| k.path.clone())
-        .collect()
+    state.known.iter().filter(|k| k.ssid == ssid).map(|k| k.path.clone()).collect()
 }
 
 /// `address/prefix` of the first IPv4 address in an IP4Config's `AddressData`.
@@ -552,15 +518,7 @@ fn first_address(ip: &Props) -> Option<String> {
 async fn scan(bus: Bus, emit: Emit<Event>, device: String) {
     emit(Event::Scanning(true));
     let before = last_scan(&bus, &device).await;
-    match bus
-        .invoke(
-            &device,
-            WIRELESS_IFACE,
-            "RequestScan",
-            &(HashMap::<&str, Value>::new(),),
-        )
-        .await
-    {
+    match bus.invoke(&device, WIRELESS_IFACE, "RequestScan", &(HashMap::<&str, Value>::new(),)).await {
         // A scan takes a few seconds; LastScan moves when it's done.
         Ok(()) => {
             for _ in 0..30 {
@@ -588,11 +546,7 @@ async fn connect(bus: Bus, emit: Emit<Event>, target: Target, password: Option<S
     emit(Event::Connecting(ssid.clone()));
     match try_connect(&bus, &target, password.as_deref()).await {
         Ok(Outcome::Connected) => emit(Event::Connected(ssid)),
-        Ok(Outcome::NeedPassword { wrong }) => emit(Event::PasswordNeeded {
-            ssid,
-            security: target.security,
-            wrong,
-        }),
+        Ok(Outcome::NeedPassword { wrong }) => emit(Event::PasswordNeeded { ssid, security: target.security, wrong }),
         Err(message) => emit(Event::Failed { ssid, message }),
     }
 }
@@ -614,28 +568,18 @@ async fn try_connect(bus: &Bus, t: &Target, password: Option<&str>) -> Result<Ou
     let mut created = None;
     match (password, t.profiles.first()) {
         (Some(pw), Some(profile)) => {
-            update_password(bus, profile, t.security, pw)
-                .await
-                .map_err(err)?;
+            update_password(bus, profile, t.security, pw).await.map_err(err)?;
             activate(bus, profile, &device, &ap).await.map_err(err)?;
         }
         (None, Some(profile)) => activate(bus, profile, &device, &ap).await.map_err(err)?,
         (pw, None) => {
             let mut settings: HashMap<&str, HashMap<&str, Value>> = HashMap::new();
             if let Some(pw) = pw {
-                settings.insert(
-                    "802-11-wireless-security",
-                    security_settings(t.security, pw),
-                );
+                settings.insert("802-11-wireless-security", security_settings(t.security, pw));
             }
             // NetworkManager fills in the rest (SSID, mode) from the access point.
             let (profile, _active): (OwnedObjectPath, OwnedObjectPath) = bus
-                .call(
-                    NM_PATH,
-                    NM_IFACE,
-                    "AddAndActivateConnection",
-                    &(settings, &device, &ap),
-                )
+                .call(NM_PATH, NM_IFACE, "AddAndActivateConnection", &(settings, &device, &ap))
                 .await
                 .map_err(err)?;
             created = Some(profile);
@@ -665,9 +609,7 @@ async fn try_connect(bus: &Bus, t: &Target, password: Option<&str>) -> Result<Ou
     };
     // Don't keep a new profile that never worked (e.g. with a mistyped password).
     if let Some(profile) = created {
-        let _ = bus
-            .invoke(profile.as_str(), CONNECTION_IFACE, "Delete", &())
-            .await;
+        let _ = bus.invoke(profile.as_str(), CONNECTION_IFACE, "Delete", &()).await;
     }
     if t.security.needs_password() && is_secrets_failure(failure) {
         Ok(Outcome::NeedPassword { wrong: true })
@@ -676,21 +618,9 @@ async fn try_connect(bus: &Bus, t: &Target, password: Option<&str>) -> Result<Ou
     }
 }
 
-async fn activate(
-    bus: &Bus,
-    profile: &str,
-    device: &ObjectPath<'_>,
-    ap: &ObjectPath<'_>,
-) -> zbus::Result<()> {
+async fn activate(bus: &Bus, profile: &str, device: &ObjectPath<'_>, ap: &ObjectPath<'_>) -> zbus::Result<()> {
     let profile = ObjectPath::try_from(profile)?;
-    bus.call::<_, OwnedObjectPath>(
-        NM_PATH,
-        NM_IFACE,
-        "ActivateConnection",
-        &(profile, device, ap),
-    )
-    .await
-    .map(drop)
+    bus.call::<_, OwnedObjectPath>(NM_PATH, NM_IFACE, "ActivateConnection", &(profile, device, ap)).await.map(drop)
 }
 
 async fn device_states(bus: &Bus, device: &str) -> zbus::Result<MessageStream> {
@@ -710,8 +640,7 @@ fn security_settings(security: Security, password: &str) -> HashMap<&'static str
         Security::Wep => {
             // 5/13 characters or 10/26 hex digits are raw keys; anything else is a passphrase.
             let raw = matches!(password.len(), 5 | 13)
-                || (matches!(password.len(), 10 | 26)
-                    && password.chars().all(|c| c.is_ascii_hexdigit()));
+                || (matches!(password.len(), 10 | 26) && password.chars().all(|c| c.is_ascii_hexdigit()));
             s.insert("key-mgmt", Value::from("none"));
             s.insert("wep-key0", Value::from(password.to_owned()));
             s.insert("wep-key-type", Value::from(if raw { 1u32 } else { 2u32 }));
@@ -729,15 +658,9 @@ fn security_settings(security: Security, password: &str) -> HashMap<&'static str
 }
 
 /// Replaces a saved profile's password, keeping its other settings.
-async fn update_password(
-    bus: &Bus,
-    profile: &str,
-    security: Security,
-    password: &str,
-) -> zbus::Result<()> {
-    let mut settings: HashMap<String, HashMap<String, OwnedValue>> = bus
-        .call(profile, CONNECTION_IFACE, "GetSettings", &())
-        .await?;
+async fn update_password(bus: &Bus, profile: &str, security: Security, password: &str) -> zbus::Result<()> {
+    let mut settings: HashMap<String, HashMap<String, OwnedValue>> =
+        bus.call(profile, CONNECTION_IFACE, "GetSettings", &()).await?;
     // These deprecated forms duplicate address-data/route-data; sending both is ambiguous.
     for ip in ["ipv4", "ipv6"] {
         if let Some(section) = settings.get_mut(ip) {
@@ -745,14 +668,11 @@ async fn update_password(
             section.remove("routes");
         }
     }
-    let section = settings
-        .entry("802-11-wireless-security".into())
-        .or_default();
+    let section = settings.entry("802-11-wireless-security".into()).or_default();
     for (key, value) in security_settings(security, password) {
         section.insert(key.into(), OwnedValue::try_from(value)?);
     }
-    bus.invoke(profile, CONNECTION_IFACE, "Update", &(settings,))
-        .await
+    bus.invoke(profile, CONNECTION_IFACE, "Update", &(settings,)).await
 }
 
 /// Device state reasons that mean the password was refused.

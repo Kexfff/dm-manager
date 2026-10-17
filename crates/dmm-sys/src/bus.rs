@@ -23,70 +23,38 @@ impl Bus {
         Self { conn, service }
     }
 
-    pub async fn call<B, R>(
-        &self,
-        path: &str,
-        iface: &str,
-        method: &str,
-        body: &B,
-    ) -> zbus::Result<R>
+    pub async fn call<B, R>(&self, path: &str, iface: &str, method: &str, body: &B) -> zbus::Result<R>
     where
         B: Serialize + DynamicType,
         R: DeserializeOwned + Type,
     {
-        let reply = self
-            .conn
-            .call_method(Some(self.service), path, Some(iface), method, body)
-            .await?;
+        let reply = self.conn.call_method(Some(self.service), path, Some(iface), method, body).await?;
         reply.body().deserialize()
     }
 
     /// Calls a method that returns nothing.
-    pub async fn invoke<B>(
-        &self,
-        path: &str,
-        iface: &str,
-        method: &str,
-        body: &B,
-    ) -> zbus::Result<()>
+    pub async fn invoke<B>(&self, path: &str, iface: &str, method: &str, body: &B) -> zbus::Result<()>
     where
         B: Serialize + DynamicType,
     {
-        self.conn
-            .call_method(Some(self.service), path, Some(iface), method, body)
-            .await
-            .map(drop)
+        self.conn.call_method(Some(self.service), path, Some(iface), method, body).await.map(drop)
     }
 
     pub async fn props(&self, path: &str, iface: &str) -> zbus::Result<Props> {
-        self.call(path, PROPERTIES, "GetAll", &(iface,))
-            .await
-            .map(Props)
+        self.call(path, PROPERTIES, "GetAll", &(iface,)).await.map(Props)
     }
 
     pub async fn get(&self, path: &str, iface: &str, name: &str) -> zbus::Result<OwnedValue> {
         self.call(path, PROPERTIES, "Get", &(iface, name)).await
     }
 
-    pub async fn set(
-        &self,
-        path: &str,
-        iface: &str,
-        name: &str,
-        value: Value<'_>,
-    ) -> zbus::Result<()> {
-        self.invoke(path, PROPERTIES, "Set", &(iface, name, value))
-            .await
+    pub async fn set(&self, path: &str, iface: &str, name: &str, value: Value<'_>) -> zbus::Result<()> {
+        self.invoke(path, PROPERTIES, "Set", &(iface, name, value)).await
     }
 
     /// Every signal from this service, plus its owner changing (the service restarting).
-    pub async fn signals(
-        &self,
-    ) -> zbus::Result<futures_util::stream::Select<MessageStream, MessageStream>> {
-        let own = MatchRule::builder()
-            .msg_type(zbus::message::Type::Signal)
-            .sender(self.service)?
-            .build();
+    pub async fn signals(&self) -> zbus::Result<futures_util::stream::Select<MessageStream, MessageStream>> {
+        let own = MatchRule::builder().msg_type(zbus::message::Type::Signal).sender(self.service)?.build();
         let owner = MatchRule::builder()
             .msg_type(zbus::message::Type::Signal)
             .sender("org.freedesktop.DBus")?

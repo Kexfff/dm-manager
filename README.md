@@ -12,8 +12,8 @@ Built with Rust, GTK 4 and libadwaita ([relm4](https://relm4.org)).
 |---|---|
 | **Wi-Fi** — on/off, current network with IP, router, band and link speed, nearby networks, joining (WPA2/WPA3/WEP/open, password prompt, retry on a wrong password), saved networks and forgetting them | ✅ |
 | **Bluetooth** — on/off (unblocks rfkill), paired devices with battery level, connect/disconnect/forget, nearby devices and pairing, including passkey and PIN prompts | ✅ |
-| Shell — dmsh's config (colors, font, island sizes, clock, quick controls) | planned |
-| Keyboard & Input — layouts, cursor theme and size, touchpad | planned |
+| **Shell** — everything in dmsh's config: colors and font, island sizes, clock formats, motion, timing, which displays show the islands, features and the session menu, with a live preview of the islands; restart dmsh from here | ✅ |
+| **Keyboard & Input** — keyboard layouts and the shortcut that switches them, key repeat, Num Lock, touchpad and mouse (tap, natural scrolling, speed, acceleration…), cursor theme (with previews) and size | ✅ |
 | Default Apps | planned |
 | Appearance — Qt/GTK themes, Dolphin included | planned |
 | Power & Sleep — dim, lock and suspend timers | planned |
@@ -26,8 +26,18 @@ Pick the accent from the colored dot at the top of the sidebar. It's saved in
 dm-manager keeps its own look even when a theming tool writes colors into
 `~/.config/gtk-4.0/gtk.css` for every app: its stylesheet sits just above that file's priority.
 
-Settings that belong to niri will be written to their own file, `~/.config/niri/dm-manager.kdl`,
-included last from your `config.kdl`; dm-manager won't edit the niri files you write by hand.
+### How settings are written
+
+- **dmsh**: `~/.config/dmsh/config.kdl` is edited in place — only the values you change; comments,
+  layout and KDL version stay as they are. Each save is checked with `dmsh config check` first,
+  and dmsh applies it live (feature switches need a restart, which the page offers).
+- **niri**: dm-manager writes only its own file, `~/.config/niri/dm-manager.kdl`. The first
+  time, the Keyboard & Input page asks to add one line to the end of your `config.kdl`:
+  `include optional=true "dm-manager.kdl"`. Being last, its values win; your own files are never
+  edited, and the page shows what's in effect across all of them. Each save is checked with
+  `niri validate`, and niri reloads it live.
+- **Cursor**: besides niri, the theme and size go to GTK (gsettings, `settings.ini`) and
+  Qt/KDE (`kcminputrc`), so apps match.
 
 ## Install
 
@@ -47,8 +57,9 @@ missing says so instead of failing.
 
 ```
 crates/
-  dmm-sys/      system backends over D-Bus (no GTK): network.rs (NetworkManager),
-                bluetooth.rs (BlueZ, including the pairing agent)
+  dmm-sys/      backends, no GTK: network.rs (NetworkManager), bluetooth.rs (BlueZ and a
+                pairing agent), dmsh.rs and niri.rs (their configs), kdl_text.rs (in-place
+                KDL editing)
   dm-manager/   the app: app.rs (window, sidebar), pages/, widgets.rs, theme.rs
     data/       style.css and bundled symbolic icons (compiled into a GResource)
 dist/           desktop entry and app icon
@@ -65,6 +76,7 @@ toggle — show up immediately.
 cargo run                                      # run from the tree
 cargo test                                     # backend unit tests
 cargo run -p dmm-sys --example probe           # print Wi-Fi and Bluetooth state, read-only
+cargo run -p dmm-sys --example inputs          # print niri's input settings in effect, read-only
 DMM_PAGE=bluetooth DMM_SCREENSHOT=/tmp/bt.png cargo run   # render a page to PNG and quit
 ```
 

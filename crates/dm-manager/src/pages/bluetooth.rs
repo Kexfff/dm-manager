@@ -72,9 +72,8 @@ impl Component for BluetoothPage {
         });
 
         let s = sender.clone();
-        let hero = Hero::new("dmm-bluetooth-active-symbolic", "Bluetooth", move |on| {
-            s.input(Input::Toggle(on))
-        });
+        let hero =
+            Hero::new("dmm-bluetooth-active-symbolic", "Bluetooth").with_switch(move |on| s.input(Input::Toggle(on)));
         let hero_group = adw::PreferencesGroup::new();
         hero_group.add(&hero.root);
 
@@ -87,13 +86,8 @@ impl Component for BluetoothPage {
         paired_group.add(&paired.list);
 
         let searching = adw::Spinner::builder().valign(gtk::Align::Center).build();
-        let nearby = KeyedList::new(Some(
-            "Looking for devices… Make sure yours is in pairing mode.",
-        ));
-        let nearby_group = adw::PreferencesGroup::builder()
-            .title("Nearby Devices")
-            .header_suffix(&searching)
-            .build();
+        let nearby = KeyedList::new(Some("Looking for devices… Make sure yours is in pairing mode."));
+        let nearby_group = adw::PreferencesGroup::builder().title("Nearby Devices").header_suffix(&searching).build();
         nearby_group.add(&nearby.list);
 
         root.add(&hero_group);
@@ -101,23 +95,8 @@ impl Component for BluetoothPage {
         root.add(&paired_group);
         root.add(&nearby_group);
 
-        let model = Self {
-            tx,
-            state: BluetoothState::default(),
-            busy: HashSet::new(),
-            visible: false,
-            prompt: None,
-        };
-        let mut widgets = Widgets {
-            hero,
-            off_group,
-            off,
-            paired_group,
-            paired,
-            nearby_group,
-            searching,
-            nearby,
-        };
+        let model = Self { tx, state: BluetoothState::default(), busy: HashSet::new(), visible: false, prompt: None };
+        let mut widgets = Widgets { hero, off_group, off, paired_group, paired, nearby_group, searching, nearby };
         model.update_view(&mut widgets, sender);
         ComponentParts { model, widgets }
     }
@@ -203,17 +182,8 @@ impl Component for BluetoothPage {
 
         w.hero.set_switch(on, adapter.is_some());
         w.hero.set_on(on);
-        w.hero.set_icon(if on {
-            "dmm-bluetooth-active-symbolic"
-        } else {
-            "dmm-bluetooth-disabled-symbolic"
-        });
-        let connected: Vec<&str> = st
-            .devices
-            .iter()
-            .filter(|d| d.connected)
-            .map(|d| d.name.as_str())
-            .collect();
+        w.hero.set_icon(if on { "dmm-bluetooth-active-symbolic" } else { "dmm-bluetooth-disabled-symbolic" });
+        let connected: Vec<&str> = st.devices.iter().filter(|d| d.connected).map(|d| d.name.as_str()).collect();
         w.hero.set_subtitle(&match (adapter, connected.as_slice()) {
             _ if !st.service => "The Bluetooth service isn't running".to_string(),
             (None, _) => "No Bluetooth adapter".to_string(),
@@ -231,11 +201,7 @@ impl Component for BluetoothPage {
                 "Start it with “systemctl enable --now bluetooth”.",
             );
         } else if adapter.is_none() {
-            w.off.set(
-                "dmm-bluetooth-disabled-symbolic",
-                "No Bluetooth adapter",
-                "No Bluetooth hardware was found.",
-            );
+            w.off.set("dmm-bluetooth-disabled-symbolic", "No Bluetooth adapter", "No Bluetooth hardware was found.");
         } else {
             w.off.set(
                 "dmm-bluetooth-disabled-symbolic",
@@ -246,23 +212,15 @@ impl Component for BluetoothPage {
 
         let item = |d: &Device| (d.path.clone(), (d.clone(), self.busy.contains(&d.path)));
         let paired = st.devices.iter().filter(|d| d.paired).map(item).collect();
-        w.paired
-            .sync(paired, |path| DeviceRow::new(path, true, &sender));
+        w.paired.sync(paired, |path| DeviceRow::new(path, true, &sender));
         w.paired_group.set_visible(on && !w.paired.is_empty());
 
         // Unnamed devices are mostly beacons and phones' randomized addresses: noise.
-        let mut nearby: Vec<_> = st
-            .devices
-            .iter()
-            .filter(|d| !d.paired && d.named)
-            .map(item)
-            .collect();
+        let mut nearby: Vec<_> = st.devices.iter().filter(|d| !d.paired && d.named).map(item).collect();
         nearby.sort_by_key(|(_, (d, _))| d.name.to_lowercase());
-        w.nearby
-            .sync(nearby, |path| DeviceRow::new(path, false, &sender));
+        w.nearby.sync(nearby, |path| DeviceRow::new(path, false, &sender));
         w.nearby_group.set_visible(on);
-        w.searching
-            .set_visible(adapter.is_some_and(|a| a.discovering));
+        w.searching.set_visible(adapter.is_some_and(|a| a.discovering));
     }
 }
 
@@ -330,10 +288,7 @@ struct DeviceRow {
 
 impl DeviceRow {
     fn new(path: &str, paired: bool, sender: &ComponentSender<BluetoothPage>) -> Self {
-        let row = adw::ActionRow::builder()
-            .use_markup(false)
-            .activatable(true)
-            .build();
+        let row = adw::ActionRow::builder().use_markup(false).activatable(true).build();
         let icon = tile("dmm-bluetooth-active-symbolic");
         row.add_prefix(&icon);
         let spinner = adw::Spinner::builder().visible(false).build();
@@ -366,12 +321,7 @@ impl DeviceRow {
             row.add_suffix(&button);
             menu
         });
-        Self {
-            row,
-            icon,
-            spinner,
-            menu,
-        }
+        Self { row, icon, spinner, menu }
     }
 }
 
@@ -384,8 +334,7 @@ impl KeyedRow for DeviceRow {
 
     fn update(&self, (d, busy): &(Device, bool)) {
         self.row.set_title(&d.name);
-        self.icon
-            .set_icon_name(Some(&device_icon(d.icon.as_deref())));
+        self.icon.set_icon_name(Some(&device_icon(d.icon.as_deref())));
         if d.connected {
             self.icon.add_css_class("accent");
         } else {
@@ -407,10 +356,7 @@ impl KeyedRow for DeviceRow {
 
         if let Some(menu) = &self.menu {
             menu.remove_all();
-            menu.append(
-                Some(if d.connected { "Disconnect" } else { "Connect" }),
-                Some("device.toggle"),
-            );
+            menu.append(Some(if d.connected { "Disconnect" } else { "Connect" }), Some("device.toggle"));
             menu.append(Some("Forget"), Some("device.forget"));
         }
     }
@@ -426,13 +372,7 @@ fn prompt_dialog(
 ) -> adw::AlertDialog {
     let dialog = adw::AlertDialog::new(None, None);
     dialog.set_close_response("cancel");
-    let code = |text: String| {
-        gtk::Label::builder()
-            .label(text)
-            .selectable(true)
-            .css_classes(["passkey"])
-            .build()
-    };
+    let code = |text: String| gtk::Label::builder().label(text).selectable(true).css_classes(["passkey"]).build();
     let numeric = prompt == Prompt::Passkey;
     // Where a PIN or passkey is typed, if the prompt asks for one.
     let mut input: Option<adw::EntryRow> = None;
@@ -456,26 +396,18 @@ fn prompt_dialog(
             } else {
                 "Enter the device's PIN code (often 0000 or 1234)."
             });
-            let entry = adw::EntryRow::builder()
-                .title(if numeric { "Passkey" } else { "PIN code" })
-                .build();
+            let entry = adw::EntryRow::builder().title(if numeric { "Passkey" } else { "PIN code" }).build();
             if numeric {
                 entry.set_input_purpose(gtk::InputPurpose::Digits);
             }
-            let list = gtk::ListBox::builder()
-                .selection_mode(gtk::SelectionMode::None)
-                .css_classes(["boxed-list"])
-                .build();
+            let list =
+                gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
             list.append(&entry);
             dialog.set_extra_child(Some(&list));
             dialog.add_responses(&[("cancel", "Cancel"), ("accept", "Pair")]);
             dialog.set_response_enabled("accept", false);
             let valid = move |text: &str| {
-                if numeric {
-                    text.len() <= 6 && text.parse::<u32>().is_ok()
-                } else {
-                    !text.is_empty()
-                }
+                if numeric { text.len() <= 6 && text.parse::<u32>().is_ok() } else { !text.is_empty() }
             };
             let d = dialog.clone();
             entry.connect_changed(move |e| d.set_response_enabled("accept", valid(&e.text())));

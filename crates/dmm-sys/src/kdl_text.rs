@@ -104,11 +104,7 @@ impl KdlText {
     /// Parses as KDL v1 only (niri's syntax), so new values are written the v1 way.
     pub fn parse_v1(text: String) -> Result<Self, String> {
         let doc = KdlDocument::parse_v1(&text).map_err(|e| describe(&text, &e))?;
-        Ok(Self {
-            text,
-            version: Version::V1,
-            doc,
-        })
+        Ok(Self { text, version: Version::V1, doc })
     }
 
     pub fn version(&self) -> Version {
@@ -144,11 +140,7 @@ impl KdlText {
     pub fn args(&self, path: &[&str]) -> Vec<Value> {
         self.node(path)
             .map(|n| {
-                n.entries()
-                    .iter()
-                    .filter(|e| e.name().is_none())
-                    .filter_map(|e| Value::from_kdl(e.value()))
-                    .collect()
+                n.entries().iter().filter(|e| e.name().is_none()).filter_map(|e| Value::from_kdl(e.value())).collect()
             })
             .unwrap_or_default()
     }
@@ -179,11 +171,7 @@ impl KdlText {
         let Some(node) = self.node(path) else {
             return self.create(path, &reprs);
         };
-        let args: Vec<&KdlEntry> = node
-            .entries()
-            .iter()
-            .filter(|e| e.name().is_none())
-            .collect();
+        let args: Vec<&KdlEntry> = node.entries().iter().filter(|e| e.name().is_none()).collect();
         let edit = match (args.first(), args.last()) {
             (Some(first), Some(last)) => {
                 let (start, _) = span(first.span());
@@ -220,9 +208,7 @@ impl KdlText {
         let rest = &self.text[end..];
         let line_end = rest.find('\n').map_or(self.text.len(), |i| end + i + 1);
         let before_blank = self.text[line_start..start].trim().is_empty();
-        let after_blank = self.text[end..line_end]
-            .trim_matches(|c: char| c.is_whitespace() || c == ';')
-            .is_empty();
+        let after_blank = self.text[end..line_end].trim_matches(|c: char| c.is_whitespace() || c == ';').is_empty();
         if before_blank && after_blank {
             start = line_start;
             end = line_end;
@@ -329,11 +315,7 @@ impl Edit {
     }
 
     fn insert(at: usize, text: String) -> Self {
-        Self {
-            start: at,
-            end: at,
-            text,
-        }
+        Self { start: at, end: at, text }
     }
 }
 
@@ -367,10 +349,7 @@ fn dedent(block: &str) -> Vec<String> {
     let first = lines.next().unwrap_or_default().trim_start().to_string();
     let rest: Vec<&str> = lines.collect();
     // The closing brace sits at the node's own indentation.
-    let base = rest
-        .last()
-        .map(|l| l.len() - l.trim_start().len())
-        .unwrap_or(0);
+    let base = rest.last().map(|l| l.len() - l.trim_start().len()).unwrap_or(0);
     let mut out = vec![first];
     out.extend(rest.iter().map(|l| {
         let cut = (l.len() - l.trim_start().len()).min(base);
@@ -382,10 +361,7 @@ fn dedent(block: &str) -> Vec<String> {
 /// The whitespace before the token at `at` on its line.
 fn indentation(text: &str, at: usize) -> String {
     let line_start = text[..at].rfind('\n').map_or(0, |i| i + 1);
-    text[line_start..at]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect()
+    text[line_start..at].chars().take_while(|c| c.is_whitespace()).collect()
 }
 
 /// A parse error with its line number.
@@ -393,10 +369,7 @@ pub fn describe(text: &str, e: &kdl::KdlError) -> String {
     let Some(d) = e.diagnostics.first() else {
         return e.to_string();
     };
-    let line = text[..d.span.offset().min(text.len())]
-        .matches('\n')
-        .count()
-        + 1;
+    let line = text[..d.span.offset().min(text.len())].matches('\n').count() + 1;
     let message = d.message.clone().unwrap_or_else(|| "invalid KDL".into());
     format!("line {line}: {message}")
 }
@@ -416,131 +389,73 @@ mod tests {
     #[test]
     fn detects_version() {
         assert_eq!(KdlText::parse(V1.into()).unwrap().version, Version::V1);
-        assert_eq!(
-            KdlText::parse("a #true\n".into()).unwrap().version,
-            Version::V2
-        );
+        assert_eq!(KdlText::parse("a #true\n".into()).unwrap().version, Version::V2);
     }
 
     #[test]
     fn reads_values() {
         let k = KdlText::parse(V1.into()).unwrap();
-        assert_eq!(
-            k.get(&["theme", "pill-color"], None),
-            Some(Value::Str("#000000".into()))
-        );
-        assert_eq!(
-            k.get(&["theme", "accent-colors"], Some("normal")),
-            Some(Value::Str("#f5f5f7".into()))
-        );
+        assert_eq!(k.get(&["theme", "pill-color"], None), Some(Value::Str("#000000".into())));
+        assert_eq!(k.get(&["theme", "accent-colors"], Some("normal")), Some(Value::Str("#f5f5f7".into())));
         assert_eq!(k.get(&["sources", "tray"], None), Some(Value::Bool(true)));
         assert_eq!(k.get(&["sources", "media"], None), None);
     }
 
     #[test]
     fn replaces_a_value_keeping_everything_else() {
-        let out = edited(V1, |k| {
-            k.set(
-                &["theme", "pill-color"],
-                None,
-                &Value::Str("#101010".into()),
-            )
-            .unwrap()
-        });
+        let out = edited(V1, |k| k.set(&["theme", "pill-color"], None, &Value::Str("#101010".into())).unwrap());
         assert_eq!(out, V1.replace("\"#000000\"", "\"#101010\""));
     }
 
     #[test]
     fn replaces_a_property() {
-        let out = edited(V1, |k| {
-            k.set(
-                &["theme", "accent-colors"],
-                Some("low"),
-                &Value::Str("#111111".into()),
-            )
-            .unwrap()
-        });
+        let out =
+            edited(V1, |k| k.set(&["theme", "accent-colors"], Some("low"), &Value::Str("#111111".into())).unwrap());
         assert_eq!(out, V1.replace("low=\"#8e8e93\"", "low=\"#111111\""));
     }
 
     #[test]
     fn adds_a_missing_property() {
-        let out = edited(V1, |k| {
-            k.set(
-                &["theme", "accent-colors"],
-                Some("high"),
-                &Value::Str("#ff9f0a".into()),
-            )
-            .unwrap()
-        });
-        assert_eq!(
-            out,
-            V1.replace("normal=\"#f5f5f7\"", "normal=\"#f5f5f7\" high=\"#ff9f0a\"")
-        );
+        let out =
+            edited(V1, |k| k.set(&["theme", "accent-colors"], Some("high"), &Value::Str("#ff9f0a".into())).unwrap());
+        assert_eq!(out, V1.replace("normal=\"#f5f5f7\"", "normal=\"#f5f5f7\" high=\"#ff9f0a\""));
     }
 
     #[test]
     fn booleans_follow_the_file_version() {
-        let out = edited(V1, |k| {
-            k.set(&["sources", "tray"], None, &Value::Bool(false))
-                .unwrap()
-        });
+        let out = edited(V1, |k| k.set(&["sources", "tray"], None, &Value::Bool(false)).unwrap());
         assert!(out.contains("    tray false\n"));
         let out = edited("sources {\n    tray #true\n}\n", |k| {
-            k.set(&["sources", "tray"], None, &Value::Bool(false))
-                .unwrap()
+            k.set(&["sources", "tray"], None, &Value::Bool(false)).unwrap()
         });
         assert_eq!(out, "sources {\n    tray #false\n}\n");
     }
 
     #[test]
     fn adds_a_child_at_the_section_indentation() {
-        let out = edited(V1, |k| {
-            k.set(&["sources", "media"], None, &Value::Bool(false))
-                .unwrap()
-        });
-        assert!(
-            out.ends_with("sources {\n    tray true\n    media false\n}\n"),
-            "{out}"
-        );
+        let out = edited(V1, |k| k.set(&["sources", "media"], None, &Value::Bool(false)).unwrap());
+        assert!(out.ends_with("sources {\n    tray true\n    media false\n}\n"), "{out}");
     }
 
     #[test]
     fn adds_a_missing_section() {
-        let out = edited(V1, |k| {
-            k.set(&["clock", "format"], None, &Value::Str("%I:%M %p".into()))
-                .unwrap()
-        });
+        let out = edited(V1, |k| k.set(&["clock", "format"], None, &Value::Str("%I:%M %p".into())).unwrap());
         assert!(out.starts_with(V1));
-        assert!(
-            out.ends_with("\nclock {\n    format \"%I:%M %p\"\n}\n"),
-            "{out}"
-        );
+        assert!(out.ends_with("\nclock {\n    format \"%I:%M %p\"\n}\n"), "{out}");
     }
 
     #[test]
     fn creates_into_an_empty_file() {
-        let out = edited("", |k| {
-            k.set(&["timing", "osd"], None, &Value::Str("2s".into()))
-                .unwrap()
-        });
+        let out = edited("", |k| k.set(&["timing", "osd"], None, &Value::Str("2s".into())).unwrap());
         assert_eq!(out, "timing {\n    osd \"2s\"\n}\n");
     }
 
     #[test]
     fn creates_nested_sections() {
         let out = edited("input {\n}\n", |k| {
-            k.set(
-                &["input", "keyboard", "xkb", "layout"],
-                None,
-                &Value::Str("us".into()),
-            )
-            .unwrap()
+            k.set(&["input", "keyboard", "xkb", "layout"], None, &Value::Str("us".into())).unwrap()
         });
-        assert_eq!(
-            out,
-            "input {\n    keyboard {\n        xkb {\n            layout \"us\"\n        }\n    }\n}\n"
-        );
+        assert_eq!(out, "input {\n    keyboard {\n        xkb {\n            layout \"us\"\n        }\n    }\n}\n");
     }
 
     #[test]
@@ -551,26 +466,17 @@ mod tests {
 
     #[test]
     fn flags_and_args() {
-        let out = edited("animation {\n    response 0.42\n}\n", |k| {
-            k.set_flag(&["animation", "off"]).unwrap()
-        });
+        let out = edited("animation {\n    response 0.42\n}\n", |k| k.set_flag(&["animation", "off"]).unwrap());
         assert_eq!(out, "animation {\n    response 0.42\n    off\n}\n");
         let out = edited("outputs {\n    only \"eDP-1\"\n}\n", |k| {
-            k.set_args(
-                &["outputs", "only"],
-                &[Value::Str("eDP-1".into()), Value::Str("HDMI-A-1".into())],
-            )
-            .unwrap()
+            k.set_args(&["outputs", "only"], &[Value::Str("eDP-1".into()), Value::Str("HDMI-A-1".into())]).unwrap()
         });
         assert_eq!(out, "outputs {\n    only \"eDP-1\" \"HDMI-A-1\"\n}\n");
     }
 
     #[test]
     fn escapes_strings_and_writes_floats() {
-        assert_eq!(
-            Value::Str("a \"b\" \\".into()).repr(Version::V1),
-            r#""a \"b\" \\""#
-        );
+        assert_eq!(Value::Str("a \"b\" \\".into()).repr(Version::V1), r#""a \"b\" \\""#);
         assert_eq!(Value::Float(1.0).repr(Version::V1), "1.0");
         assert_eq!(Value::Float(0.42).repr(Version::V2), "0.42");
     }
@@ -581,23 +487,13 @@ mod tests {
         let k = KdlText::parse_v1(source.into()).unwrap();
         let touchpad = k.node(&["input", "touchpad"]).unwrap();
         let (start, end) = span(touchpad.span());
-        let out = edited("// mine\n", |m| {
-            m.insert_node_text(&["input"], &source[start..end]).unwrap()
-        });
-        assert_eq!(
-            out,
-            "// mine\n\ninput {\n    touchpad {\n        tap\n        accel-speed 0.2\n    }\n}\n"
-        );
+        let out = edited("// mine\n", |m| m.insert_node_text(&["input"], &source[start..end]).unwrap());
+        assert_eq!(out, "// mine\n\ninput {\n    touchpad {\n        tap\n        accel-speed 0.2\n    }\n}\n");
     }
 
     #[test]
     fn single_line_children() {
-        let out = edited("a { b 1; }\n", |k| {
-            k.set(&["a", "c"], None, &Value::Int(2)).unwrap()
-        });
-        assert_eq!(
-            KdlText::parse(out).unwrap().get(&["a", "c"], None),
-            Some(Value::Int(2))
-        );
+        let out = edited("a { b 1; }\n", |k| k.set(&["a", "c"], None, &Value::Int(2)).unwrap());
+        assert_eq!(KdlText::parse(out).unwrap().get(&["a", "c"], None), Some(Value::Int(2)));
     }
 }

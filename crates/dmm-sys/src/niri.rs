@@ -104,25 +104,37 @@ impl InputConfig {
     /// Keyboard layouts as `(layout, variant)` pairs, in switching order.
     pub fn layouts(&self) -> Vec<(String, String)> {
         let layouts = self.xkb.string("layout").unwrap_or_default();
-        let variants: Vec<&str> = self
-            .xkb
-            .string("variant")
-            .unwrap_or_default()
-            .split(',')
-            .collect();
+        let variants: Vec<&str> = self.xkb.string("variant").unwrap_or_default().split(',').collect();
         layouts
             .split(',')
             .map(str::trim)
             .filter(|l| !l.is_empty())
             .enumerate()
-            .map(|(i, l)| {
-                (
-                    l.to_string(),
-                    variants.get(i).map_or("", |v| v.trim()).to_string(),
-                )
-            })
+            .map(|(i, l)| (l.to_string(), variants.get(i).map_or("", |v| v.trim()).to_string()))
             .collect()
     }
+}
+
+/// `layout` and `variant` values for these `(layout, variant)` pairs; no variant value when
+/// none has one.
+pub fn join_layouts(layouts: &[(String, String)]) -> (String, Option<String>) {
+    let layout = layouts.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(",");
+    let variants = layouts.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(",");
+    let any = layouts.iter().any(|(_, v)| !v.is_empty());
+    (layout, any.then_some(variants))
+}
+
+/// The `grp:` option (how layouts are switched) in an xkb options string.
+pub fn switch_option(options: &str) -> Option<&str> {
+    options.split(',').map(str::trim).find(|o| o.starts_with("grp:"))
+}
+
+/// The options string with its `grp:` option replaced (or removed); `None` if nothing's left.
+pub fn with_switch_option(options: &str, switch: Option<&str>) -> Option<String> {
+    let mut kept: Vec<&str> =
+        options.split(',').map(str::trim).filter(|o| !o.is_empty() && !o.starts_with("grp:")).collect();
+    kept.extend(switch);
+    (!kept.is_empty()).then(|| kept.join(","))
 }
 
 pub fn niri_dir() -> PathBuf {
@@ -151,17 +163,11 @@ pub fn effective() -> InputConfig {
     config
 }
 
-fn read_into(
-    path: &Path,
-    own: &Path,
-    config: &mut InputConfig,
-    depth: usize,
-) -> Result<(), String> {
+fn read_into(path: &Path, own: &Path, config: &mut InputConfig, depth: usize) -> Result<(), String> {
     if depth > 16 {
         return Err("includes nest too deeply".into());
     }
-    let text =
-        std::fs::read_to_string(path).map_err(|e| format!("Can't read {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("Can't read {}: {e}", path.display()))?;
     let file = KdlText::parse(text).map_err(|e| format!("{}: {e}", path.display()))?;
     let dir = path.parent().unwrap_or(Path::new("/"));
 
@@ -175,9 +181,7 @@ fn read_into(
                     continue;
                 };
                 let target = resolve(dir, target);
-                let optional = node
-                    .entry("optional")
-                    .is_some_and(|e| e.value().as_bool() == Some(true));
+                let optional = node.entry("optional").is_some_and(|e| e.value().as_bool() == Some(true));
                 if same_file(&target, own) {
                     config.included = true;
                 }
@@ -238,9 +242,7 @@ fn merge(section: &mut Section, node: &kdl::KdlNode) {
             continue;
         }
         if let Some(value) = node_value(child) {
-            section
-                .fields
-                .insert(child.name().value().to_string(), value);
+            section.fields.insert(child.name().value().to_string(), value);
         }
     }
 }
@@ -278,13 +280,7 @@ impl NiriFile {
     /// Sets a value (`None` goes back to what the other files say, or niri's default).
     /// `effective` is the config in effect, so blocks niri replaces as a whole can be
     /// carried over before one of their settings changes.
-    pub fn set(
-        &mut self,
-        effective: &InputConfig,
-        area: Area,
-        key: &str,
-        value: Option<Value>,
-    ) -> Result<(), String> {
+    pub fn set(&mut self, effective: &InputConfig, area: Area, key: &str, value: Option<Value>) -> Result<(), String> {
         let path = area.path();
         if area.replaced_whole() && self.file.node(path).is_none() {
             // This block will replace the one in effect; start from a copy of it.
@@ -320,14 +316,8 @@ impl NiriFile {
         let dir = self.path.parent().ok_or("no niri config directory")?;
         std::fs::create_dir_all(dir).map_err(|e| format!("Can't create {}: {e}", dir.display()))?;
         let tmp = dir.join(".dm-manager.kdl.tmp");
-        std::fs::write(&tmp, self.file.text())
-            .map_err(|e| format!("Can't write {}: {e}", tmp.display()))?;
-        match Command::new("niri")
-            .arg("validate")
-            .arg("-c")
-            .arg(&tmp)
-            .output()
-        {
+        std::fs::write(&tmp, self.file.text()).map_err(|e| format!("Can't write {}: {e}", tmp.display()))?;
+        match Command::new("niri").arg("validate").arg("-c").arg(&tmp).output() {
             Ok(out) if !out.status.success() => {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(validate_error(&String::from_utf8_lossy(&out.stderr)));
@@ -335,8 +325,7 @@ impl NiriFile {
             Ok(_) => {}
             Err(e) => log::warn!("can't run niri validate: {e}"),
         }
-        std::fs::rename(&tmp, &self.path)
-            .map_err(|e| format!("Can't save {}: {e}", self.path.display()))
+        std::fs::rename(&tmp, &self.path).map_err(|e| format!("Can't save {}: {e}", self.path.display()))
     }
 }
 
@@ -345,9 +334,7 @@ fn validate_error(stderr: &str) -> String {
     stderr
         .lines()
         .map(|l| l.trim().trim_start_matches(['×', '├', '╰', '─', '▶', ' ']))
-        .rfind(|l| {
-            !l.is_empty() && !l.contains("error loading config") && !l.contains("error parsing")
-        })
+        .rfind(|l| !l.is_empty() && !l.contains("error loading config") && !l.contains("error parsing"))
         .unwrap_or("niri rejected the settings")
         .to_string()
 }
@@ -355,8 +342,7 @@ fn validate_error(stderr: &str) -> String {
 /// Adds the include for dm-manager's file to the end of niri's main config.
 pub fn add_include() -> Result<(), String> {
     let main = main_config();
-    let mut text = std::fs::read_to_string(&main)
-        .map_err(|e| format!("Can't read {}: {e}", main.display()))?;
+    let mut text = std::fs::read_to_string(&main).map_err(|e| format!("Can't read {}: {e}", main.display()))?;
     if !text.ends_with('\n') {
         text.push('\n');
     }
@@ -389,11 +375,7 @@ impl XkbCatalog {
     /// "Russian (phonetic)", or the raw names if unknown.
     pub fn describe(&self, layout: &str, variant: &str) -> String {
         let Some(l) = self.layouts.iter().find(|l| l.name == layout) else {
-            return if variant.is_empty() {
-                layout.to_string()
-            } else {
-                format!("{layout} ({variant})")
-            };
+            return if variant.is_empty() { layout.to_string() } else { format!("{layout} ({variant})") };
         };
         if variant.is_empty() {
             return l.description.clone();
@@ -408,12 +390,9 @@ impl XkbCatalog {
 
 /// Layouts and switching options from xkeyboard-config's rules.
 pub fn xkb_catalog() -> XkbCatalog {
-    let path = [
-        "/usr/share/X11/xkb/rules/evdev.xml",
-        "/usr/share/xkeyboard-config-2/rules/evdev.xml",
-    ]
-    .into_iter()
-    .find(|p| Path::new(p).exists());
+    let path = ["/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/xkeyboard-config-2/rules/evdev.xml"]
+        .into_iter()
+        .find(|p| Path::new(p).exists());
     let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) else {
         return XkbCatalog::default();
     };
@@ -422,10 +401,7 @@ pub fn xkb_catalog() -> XkbCatalog {
 
 fn parse_xkb_rules(xml: &str) -> XkbCatalog {
     // evdev.xml starts with a DOCTYPE, which roxmltree refuses unless told otherwise.
-    let options = roxmltree::ParsingOptions {
-        allow_dtd: true,
-        ..Default::default()
-    };
+    let options = roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() };
     let Ok(doc) = roxmltree::Document::parse_with_options(xml, options) else {
         return XkbCatalog::default();
     };
@@ -435,27 +411,14 @@ fn parse_xkb_rules(xml: &str) -> XkbCatalog {
             continue;
         };
         let variants = child(layout, "variantList")
-            .map(|list| {
-                list.children()
-                    .filter(|n| n.has_tag_name("variant"))
-                    .filter_map(item)
-                    .collect()
-            })
+            .map(|list| list.children().filter(|n| n.has_tag_name("variant")).filter_map(item).collect())
             .unwrap_or_default();
-        catalog.layouts.push(XkbLayout {
-            name,
-            description,
-            variants,
-        });
+        catalog.layouts.push(XkbLayout { name, description, variants });
     }
-    catalog
-        .layouts
-        .sort_by_key(|l| l.description.to_lowercase());
+    catalog.layouts.sort_by_key(|l| l.description.to_lowercase());
 
-    if let Some(group) = doc
-        .descendants()
-        .filter(|n| n.has_tag_name("group"))
-        .find(|g| item(*g).is_some_and(|(name, _)| name == "grp"))
+    if let Some(group) =
+        doc.descendants().filter(|n| n.has_tag_name("group")).find(|g| item(*g).is_some_and(|(name, _)| name == "grp"))
     {
         catalog.switch_options = group
             .children()
@@ -475,19 +438,32 @@ fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, tag: &str) -> Option<roxmltree::Nod
 fn item(n: roxmltree::Node<'_, '_>) -> Option<(String, String)> {
     let config = child(n, "configItem")?;
     let name = child(config, "name")?.text()?.to_string();
-    let description = child(config, "description")
-        .and_then(|d| d.text())
-        .unwrap_or(&name)
-        .to_string();
+    let description = child(config, "description").and_then(|d| d.text()).unwrap_or(&name).to_string();
     Some((name, description))
+}
+
+/// A connected display: `(connector, "Make Model")`, from `niri msg outputs`.
+pub fn outputs() -> Vec<(String, String)> {
+    let Ok(out) = Command::new("niri").args(["msg", "--json", "outputs"]).output() else { return Vec::new() };
+    let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return Vec::new() };
+    let mut outputs: Vec<(String, String)> = json
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, o)| {
+            let field = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or_default().trim().to_string();
+            let description = format!("{} {}", field("make"), field("model")).trim().to_string();
+            (name.clone(), description)
+        })
+        .collect();
+    outputs.sort();
+    outputs
 }
 
 /// Whether a touchpad is connected.
 pub fn has_touchpad() -> bool {
-    std::fs::read_to_string("/proc/bus/input/devices").is_ok_and(|d| {
-        d.lines()
-            .any(|l| l.starts_with("N: Name=") && l.to_lowercase().contains("touchpad"))
-    })
+    std::fs::read_to_string("/proc/bus/input/devices")
+        .is_ok_and(|d| d.lines().any(|l| l.starts_with("N: Name=") && l.to_lowercase().contains("touchpad")))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -501,15 +477,9 @@ pub struct CursorTheme {
 /// Installed cursor themes (icon themes with a `cursors` directory).
 pub fn cursor_themes() -> Vec<CursorTheme> {
     let home = crate::home().unwrap_or_default();
-    let data_dirs =
-        std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    let data_dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     let mut roots = vec![home.join(".local/share/icons"), home.join(".icons")];
-    roots.extend(
-        data_dirs
-            .split(':')
-            .filter(|d| !d.is_empty())
-            .map(|d| PathBuf::from(d).join("icons")),
-    );
+    roots.extend(data_dirs.split(':').filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("icons")));
     roots.push(PathBuf::from("/usr/share/pixmaps"));
 
     let mut themes: Vec<CursorTheme> = Vec::new();
@@ -525,10 +495,7 @@ pub fn cursor_themes() -> Vec<CursorTheme> {
             }
             let name = std::fs::read_to_string(dir.join("index.theme"))
                 .ok()
-                .and_then(|t| {
-                    t.lines()
-                        .find_map(|l| l.strip_prefix("Name=").map(|n| n.trim().to_string()))
-                })
+                .and_then(|t| t.lines().find_map(|l| l.strip_prefix("Name=").map(|n| n.trim().to_string())))
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| id.clone());
             themes.push(CursorTheme { id, name, dir });
@@ -548,20 +515,14 @@ pub struct CursorImage {
 
 /// The first of `names` the theme has, at the nominal size closest to `size`.
 pub fn cursor_image(theme: &CursorTheme, names: &[&str], size: u32) -> Option<CursorImage> {
-    let file = names
-        .iter()
-        .map(|n| theme.dir.join("cursors").join(n))
-        .find(|p| p.exists())?;
+    let file = names.iter().map(|n| theme.dir.join("cursors").join(n)).find(|p| p.exists())?;
     read_xcursor(&std::fs::read(file).ok()?, size)
 }
 
 /// Reads an Xcursor file: a table of contents pointing at image chunks of several sizes.
 fn read_xcursor(data: &[u8], size: u32) -> Option<CursorImage> {
     const IMAGE: u32 = 0xfffd_0002;
-    let u32_at = |at: usize| {
-        data.get(at..at + 4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
-    };
+    let u32_at = |at: usize| data.get(at..at + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
     if data.get(0..4)? != b"Xcur" {
         return None;
     }
@@ -576,37 +537,23 @@ fn read_xcursor(data: &[u8], size: u32) -> Option<CursorImage> {
     let width = u32_at(position + 16)?;
     let height = u32_at(position + 20)?;
     let start = position + 36;
-    let len = (width as usize)
-        .checked_mul(height as usize)?
-        .checked_mul(4)?;
+    let len = (width as usize).checked_mul(height as usize)?.checked_mul(4)?;
     if width == 0 || height == 0 || width > 1024 || height > 1024 {
         return None;
     }
     // Pixels are little-endian ARGB u32s, premultiplied: in memory that's B, G, R, A.
     let pixels = data.get(start..start + len)?.to_vec();
-    Some(CursorImage {
-        width,
-        height,
-        pixels,
-    })
+    Some(CursorImage { width, height, pixels })
 }
 
 /// Applies a cursor theme beyond niri (which sets it for the apps it starts): GTK through
 /// gsettings and its settings.ini files, Qt/KDE through kcminputrc. Best effort.
 pub fn apply_cursor_to_toolkits(theme: Option<&str>, size: Option<u32>) {
     let quiet = |cmd: &mut Command| {
-        let _ = cmd
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        let _ = cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
     };
     if let Some(theme) = theme {
-        quiet(Command::new("gsettings").args([
-            "set",
-            "org.gnome.desktop.interface",
-            "cursor-theme",
-            theme,
-        ]));
+        quiet(Command::new("gsettings").args(["set", "org.gnome.desktop.interface", "cursor-theme", theme]));
         quiet(Command::new("kwriteconfig6").args([
             "--file",
             "kcminputrc",
@@ -619,12 +566,7 @@ pub fn apply_cursor_to_toolkits(theme: Option<&str>, size: Option<u32>) {
     }
     if let Some(size) = size {
         let size = size.to_string();
-        quiet(Command::new("gsettings").args([
-            "set",
-            "org.gnome.desktop.interface",
-            "cursor-size",
-            &size,
-        ]));
+        quiet(Command::new("gsettings").args(["set", "org.gnome.desktop.interface", "cursor-size", &size]));
         quiet(Command::new("kwriteconfig6").args([
             "--file",
             "kcminputrc",
@@ -719,20 +661,11 @@ cursor {
         let c = effective_of(&[("config.kdl", MAIN), ("local.kdl", LOCAL)]);
         assert!(c.included);
         assert_eq!(c.keyboard.number("repeat-delay"), Some(250.0));
-        assert_eq!(
-            c.layouts(),
-            vec![
-                ("us".to_string(), String::new()),
-                ("ru".to_string(), String::new())
-            ]
-        );
+        assert_eq!(c.layouts(), vec![("us".to_string(), String::new()), ("ru".to_string(), String::new())]);
         assert_eq!(c.xkb.string("options"), Some("grp:alt_shift_toggle"));
         assert!(c.touchpad.flag("tap"));
         assert!(c.cursor.flag("hide-when-typing"));
-        assert_eq!(
-            c.cursor.string("xcursor-theme"),
-            Some("capitaine-cursors-light")
-        );
+        assert_eq!(c.cursor.string("xcursor-theme"), Some("capitaine-cursors-light"));
     }
 
     #[test]
@@ -746,37 +679,18 @@ cursor {
     #[test]
     fn turning_off_a_touchpad_flag_copies_the_block() {
         let c = effective_of(&[("config.kdl", MAIN), ("local.kdl", LOCAL)]);
-        let mut own = NiriFile {
-            path: PathBuf::from("/nonexistent"),
-            file: KdlText::parse_v1(HEADER.into()).unwrap(),
-        };
-        own.set(&c, Area::Touchpad, "tap", Some(Value::Bool(false)))
-            .unwrap();
-        assert!(
-            own.text()
-                .ends_with("input {\n    touchpad {\n        natural-scroll\n    }\n}\n"),
-            "{}",
-            own.text()
-        );
-        own.set(&c, Area::Touchpad, "accel-speed", Some(Value::Float(0.3)))
-            .unwrap();
-        assert!(
-            own.text()
-                .contains("        natural-scroll\n        accel-speed 0.3\n"),
-            "{}",
-            own.text()
-        );
+        let mut own = NiriFile { path: PathBuf::from("/nonexistent"), file: KdlText::parse_v1(HEADER.into()).unwrap() };
+        own.set(&c, Area::Touchpad, "tap", Some(Value::Bool(false))).unwrap();
+        assert!(own.text().ends_with("input {\n    touchpad {\n        natural-scroll\n    }\n}\n"), "{}", own.text());
+        own.set(&c, Area::Touchpad, "accel-speed", Some(Value::Float(0.3))).unwrap();
+        assert!(own.text().contains("        natural-scroll\n        accel-speed 0.3\n"), "{}", own.text());
     }
 
     #[test]
     fn xkb_is_written_whole() {
         let c = effective_of(&[("config.kdl", MAIN), ("local.kdl", LOCAL)]);
-        let mut own = NiriFile {
-            path: PathBuf::from("/nonexistent"),
-            file: KdlText::parse_v1(HEADER.into()).unwrap(),
-        };
-        own.set(&c, Area::Xkb, "layout", Some(Value::Str("us,de".into())))
-            .unwrap();
+        let mut own = NiriFile { path: PathBuf::from("/nonexistent"), file: KdlText::parse_v1(HEADER.into()).unwrap() };
+        own.set(&c, Area::Xkb, "layout", Some(Value::Str("us,de".into()))).unwrap();
         let text = own.text();
         assert!(text.contains("layout \"us,de\""), "{text}");
         assert!(text.contains("options \"grp:alt_shift_toggle\""), "{text}");
@@ -785,35 +699,11 @@ cursor {
     #[test]
     fn flags_outside_device_blocks_can_be_turned_off() {
         let c = effective_of(&[("config.kdl", MAIN)]);
-        let mut own = NiriFile {
-            path: PathBuf::from("/nonexistent"),
-            file: KdlText::parse_v1(HEADER.into()).unwrap(),
-        };
-        own.set(
-            &c,
-            Area::Cursor,
-            "hide-when-typing",
-            Some(Value::Bool(false)),
-        )
-        .unwrap();
-        assert!(
-            own.text()
-                .ends_with("cursor {\n    hide-when-typing false\n}\n"),
-            "{}",
-            own.text()
-        );
-        own.set(
-            &c,
-            Area::Cursor,
-            "hide-when-typing",
-            Some(Value::Bool(true)),
-        )
-        .unwrap();
-        assert!(
-            own.text().ends_with("cursor {\n    hide-when-typing\n}\n"),
-            "{}",
-            own.text()
-        );
+        let mut own = NiriFile { path: PathBuf::from("/nonexistent"), file: KdlText::parse_v1(HEADER.into()).unwrap() };
+        own.set(&c, Area::Cursor, "hide-when-typing", Some(Value::Bool(false))).unwrap();
+        assert!(own.text().ends_with("cursor {\n    hide-when-typing false\n}\n"), "{}", own.text());
+        own.set(&c, Area::Cursor, "hide-when-typing", Some(Value::Bool(true))).unwrap();
+        assert!(own.text().ends_with("cursor {\n    hide-when-typing\n}\n"), "{}", own.text());
     }
 
     #[test]
@@ -835,6 +725,19 @@ cursor {
     }
 
     #[test]
+    fn layout_strings() {
+        let pairs = |p: &[(&str, &str)]| p.iter().map(|(l, v)| (l.to_string(), v.to_string())).collect::<Vec<_>>();
+        assert_eq!(join_layouts(&pairs(&[("us", ""), ("ru", "")])), ("us,ru".into(), None));
+        assert_eq!(join_layouts(&pairs(&[("us", ""), ("ru", "phonetic")])), ("us,ru".into(), Some(",phonetic".into())));
+        assert_eq!(switch_option("caps:escape, grp:alt_shift_toggle"), Some("grp:alt_shift_toggle"));
+        assert_eq!(
+            with_switch_option("caps:escape,grp:alt_shift_toggle", Some("grp:win_space_toggle")),
+            Some("caps:escape,grp:win_space_toggle".into())
+        );
+        assert_eq!(with_switch_option("grp:alt_shift_toggle", None), None);
+    }
+
+    #[test]
     fn ini_cursor_lines() {
         let ini = "[Settings]\ngtk-cursor-theme-name=old\ngtk-font-name=Inter 11\n";
         assert_eq!(
@@ -847,24 +750,7 @@ cursor {
     fn xcursor() {
         // Header (16 bytes), one TOC entry, one 1x1 image chunk.
         let mut data = b"Xcur".to_vec();
-        for n in [
-            16u32,
-            0x1_0000,
-            1,
-            0xfffd_0002,
-            24,
-            28,
-            36,
-            0xfffd_0002,
-            24,
-            1,
-            1,
-            1,
-            0,
-            0,
-            0,
-            0xff10_2030,
-        ] {
+        for n in [16u32, 0x1_0000, 1, 0xfffd_0002, 24, 28, 36, 0xfffd_0002, 24, 1, 1, 1, 0, 0, 0, 0xff10_2030] {
             data.extend(n.to_le_bytes());
         }
         let img = read_xcursor(&data, 32).unwrap();

@@ -124,35 +124,20 @@ pub enum Event {
 type ManagedObjects = HashMap<OwnedObjectPath, HashMap<String, HashMap<String, OwnedValue>>>;
 type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<Reply>>>>;
 
-pub async fn run(
-    mut requests: UnboundedReceiver<Request>,
-    emit: impl Fn(Event) + Send + Sync + 'static,
-) {
+pub async fn run(mut requests: UnboundedReceiver<Request>, emit: impl Fn(Event) + Send + Sync + 'static) {
     let emit: Emit<Event> = Arc::new(emit);
     let conn = match Connection::system().await {
         Ok(conn) => conn,
         Err(e) => {
             emit(Event::State(BluetoothState::default()));
-            emit(Event::Error(format!(
-                "No system bus: {}",
-                describe_error(&e)
-            )));
+            emit(Event::Error(format!("No system bus: {}", describe_error(&e))));
             while requests.recv().await.is_some() {}
             return;
         }
     };
-    let bt = Bt {
-        bus: Bus::new(conn.clone(), SERVICE),
-        emit: emit.clone(),
-        pending: Pending::default(),
-    };
+    let bt = Bt { bus: Bus::new(conn.clone(), SERVICE), emit: emit.clone(), pending: Pending::default() };
 
-    let agent = Agent {
-        bus: bt.bus.clone(),
-        emit: emit.clone(),
-        pending: bt.pending.clone(),
-        next: AtomicU32::new(1),
-    };
+    let agent = Agent { bus: bt.bus.clone(), emit: emit.clone(), pending: bt.pending.clone(), next: AtomicU32::new(1) };
     if let Err(e) = conn.object_server().at(AGENT_PATH, agent).await {
         log::warn!("can't serve the pairing agent: {e}");
     }
@@ -224,76 +209,38 @@ struct Bt {
 impl Bt {
     async fn register_agent(&self) {
         let path = ObjectPath::from_static_str_unchecked(AGENT_PATH);
-        let registered = self
-            .bus
-            .invoke(
-                "/org/bluez",
-                AGENT_MANAGER_IFACE,
-                "RegisterAgent",
-                &(&path, "KeyboardDisplay"),
-            )
-            .await;
+        let registered =
+            self.bus.invoke("/org/bluez", AGENT_MANAGER_IFACE, "RegisterAgent", &(&path, "KeyboardDisplay")).await;
         if let Err(e) = registered {
             log::warn!("can't register the pairing agent: {e}");
             return;
         }
-        if let Err(e) = self
-            .bus
-            .invoke(
-                "/org/bluez",
-                AGENT_MANAGER_IFACE,
-                "RequestDefaultAgent",
-                &(&path,),
-            )
-            .await
-        {
+        if let Err(e) = self.bus.invoke("/org/bluez", AGENT_MANAGER_IFACE, "RequestDefaultAgent", &(&path,)).await {
             log::debug!("not the default pairing agent: {e}");
         }
     }
 
     async fn snapshot(&self) -> BluetoothState {
-        let objects: ManagedObjects = match self
-            .bus
-            .call(
-                "/",
-                "org.freedesktop.DBus.ObjectManager",
-                "GetManagedObjects",
-                &(),
-            )
-            .await
-        {
-            Ok(objects) => objects,
-            Err(e) => {
-                log::debug!("BlueZ unavailable: {e}");
-                return BluetoothState::default();
-            }
-        };
+        let objects: ManagedObjects =
+            match self.bus.call("/", "org.freedesktop.DBus.ObjectManager", "GetManagedObjects", &()).await {
+                Ok(objects) => objects,
+                Err(e) => {
+                    log::debug!("BlueZ unavailable: {e}");
+                    return BluetoothState::default();
+                }
+            };
         let mut objects: Vec<(String, HashMap<String, Props>)> = objects
             .into_iter()
-            .map(|(path, ifaces)| {
-                (
-                    path.to_string(),
-                    ifaces.into_iter().map(|(i, p)| (i, Props(p))).collect(),
-                )
-            })
+            .map(|(path, ifaces)| (path.to_string(), ifaces.into_iter().map(|(i, p)| (i, Props(p))).collect()))
             .collect();
         objects.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut state = BluetoothState {
-            service: true,
-            ..Default::default()
-        };
-        let Some((path, adapter)) = objects
-            .iter()
-            .find_map(|(path, i)| Some((path, i.get(ADAPTER_IFACE)?)))
-        else {
+        let mut state = BluetoothState { service: true, ..Default::default() };
+        let Some((path, adapter)) = objects.iter().find_map(|(path, i)| Some((path, i.get(ADAPTER_IFACE)?))) else {
             return state;
         };
         let adapter = Adapter {
-            name: adapter
-                .str("Alias")
-                .or_else(|| adapter.str("Name"))
-                .unwrap_or_default(),
+            name: adapter.str("Alias").or_else(|| adapter.str("Name")).unwrap_or_default(),
             address: adapter.str("Address").unwrap_or_default(),
             powered: adapter.bool("Powered").unwrap_or(false),
             discovering: adapter.bool("Discovering").unwrap_or(false),
@@ -323,9 +270,7 @@ impl Bt {
             });
         }
         state.devices.sort_by(|a, b| {
-            b.connected
-                .cmp(&a.connected)
-                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            b.connected.cmp(&a.connected).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         state.adapter = Some(adapter);
         state
@@ -336,12 +281,7 @@ impl Bt {
         let emit = self.emit.clone();
         let adapter = state.adapter.as_ref().map(|a| a.path.clone());
         let name_of = |path: &str| {
-            state
-                .devices
-                .iter()
-                .find(|d| d.path == path)
-                .map(|d| d.name.clone())
-                .unwrap_or_else(|| "the device".into())
+            state.devices.iter().find(|d| d.path == path).map(|d| d.name.clone()).unwrap_or_else(|| "the device".into())
         };
         match req {
             Request::SetPowered(on) => {
@@ -349,21 +289,14 @@ impl Bt {
                 tokio::spawn(async move {
                     if let Err(e) = set_powered(&bus, &adapter, on).await {
                         let verb = if on { "on" } else { "off" };
-                        emit(Event::Error(format!(
-                            "Couldn't turn Bluetooth {verb}: {}",
-                            describe_error(&e)
-                        )));
+                        emit(Event::Error(format!("Couldn't turn Bluetooth {verb}: {}", describe_error(&e))));
                     }
                 });
             }
             Request::Discover(on) => {
                 let Some(adapter) = adapter else { return };
                 tokio::spawn(async move {
-                    let method = if on {
-                        "StartDiscovery"
-                    } else {
-                        "StopDiscovery"
-                    };
+                    let method = if on { "StartDiscovery" } else { "StopDiscovery" };
                     // Fails harmlessly when already (not) discovering.
                     if let Err(e) = bus.invoke(&adapter, ADAPTER_IFACE, method, &()).await {
                         log::debug!("{method}: {e}");
@@ -388,9 +321,7 @@ impl Bt {
             }
             Request::Pair(path) => {
                 let name = name_of(&path);
-                tokio::spawn(busy(emit.clone(), path.clone(), async move {
-                    pair(&bus, &path, &name).await
-                }));
+                tokio::spawn(busy(emit.clone(), path.clone(), async move { pair(&bus, &path, &name).await }));
             }
             Request::Remove(path) => {
                 let Some(adapter) = adapter else { return };
@@ -400,14 +331,8 @@ impl Bt {
                         Ok(p) => p,
                         Err(e) => return emit(Event::Error(e.to_string())),
                     };
-                    if let Err(e) = bus
-                        .invoke(&adapter, ADAPTER_IFACE, "RemoveDevice", &(device,))
-                        .await
-                    {
-                        emit(Event::Error(format!(
-                            "Couldn't forget {name}: {}",
-                            describe_error(&e)
-                        )));
+                    if let Err(e) = bus.invoke(&adapter, ADAPTER_IFACE, "RemoveDevice", &(device,)).await {
+                        emit(Event::Error(format!("Couldn't forget {name}: {}", describe_error(&e))));
                     }
                 });
             }
@@ -422,10 +347,7 @@ impl Bt {
 
 /// Runs `work` with the device marked busy, reporting a failure as an error.
 async fn busy(emit: Emit<Event>, path: String, work: impl Future<Output = Result<(), String>>) {
-    emit(Event::Busy {
-        path: path.clone(),
-        busy: true,
-    });
+    emit(Event::Busy { path: path.clone(), busy: true });
     let result = work.await;
     emit(Event::Busy { path, busy: false });
     if let Err(message) = result {
@@ -434,24 +356,17 @@ async fn busy(emit: Emit<Event>, path: String, work: impl Future<Output = Result
 }
 
 async fn set_powered(bus: &Bus, adapter: &str, on: bool) -> zbus::Result<()> {
-    let result = bus
-        .set(adapter, ADAPTER_IFACE, "Powered", Value::from(on))
-        .await;
+    let result = bus.set(adapter, ADAPTER_IFACE, "Powered", Value::from(on)).await;
     let blocked = matches!(&result, Err(e) if {
         let text = describe_error(e).to_lowercase();
         text.contains("rfkill") || text.contains("blocked")
     });
     if on && blocked {
         // Soft-blocked; the session user may unblock it (uaccess on /dev/rfkill).
-        let unblocked = tokio::process::Command::new("rfkill")
-            .args(["unblock", "bluetooth"])
-            .status()
-            .await;
+        let unblocked = tokio::process::Command::new("rfkill").args(["unblock", "bluetooth"]).status().await;
         if matches!(unblocked, Ok(s) if s.success()) {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            return bus
-                .set(adapter, ADAPTER_IFACE, "Powered", Value::from(on))
-                .await;
+            return bus.set(adapter, ADAPTER_IFACE, "Powered", Value::from(on)).await;
         }
     }
     result
@@ -460,25 +375,16 @@ async fn set_powered(bus: &Bus, adapter: &str, on: bool) -> zbus::Result<()> {
 async fn pair(bus: &Bus, path: &str, name: &str) -> Result<(), String> {
     match bus.invoke(path, DEVICE_IFACE, "Pair", &()).await {
         Ok(()) => {}
-        Err(zbus::Error::MethodError(err, _, _))
-            if err.as_str() == "org.bluez.Error.AlreadyExists" => {}
+        Err(zbus::Error::MethodError(err, _, _)) if err.as_str() == "org.bluez.Error.AlreadyExists" => {}
         Err(e) => return Err(format!("Couldn't pair with {name}: {}", describe_error(&e))),
     }
     // Trusted devices reconnect on their own and don't need service authorization.
-    if let Err(e) = bus
-        .set(path, DEVICE_IFACE, "Trusted", Value::from(true))
-        .await
-    {
+    if let Err(e) = bus.set(path, DEVICE_IFACE, "Trusted", Value::from(true)).await {
         log::debug!("trust {path}: {e}");
     }
     bus.invoke(path, DEVICE_IFACE, "Connect", &())
         .await
-        .map_err(|e| {
-            format!(
-                "Paired with {name}, but couldn't connect: {}",
-                describe_error(&e)
-            )
-        })
+        .map_err(|e| format!("Paired with {name}, but couldn't connect: {}", describe_error(&e)))
 }
 
 #[derive(Debug, zbus::DBusError)]
@@ -538,8 +444,7 @@ impl Agent {
     }
 
     async fn display_pin_code(&self, device: OwnedObjectPath, pincode: String) {
-        self.show(&device, Prompt::DisplayPinCode { pin: pincode })
-            .await;
+        self.show(&device, Prompt::DisplayPinCode { pin: pincode }).await;
     }
 
     async fn request_passkey(&self, device: OwnedObjectPath) -> Result<u32, AgentError> {
@@ -556,11 +461,7 @@ impl Agent {
         }
     }
 
-    async fn request_confirmation(
-        &self,
-        device: OwnedObjectPath,
-        passkey: u32,
-    ) -> Result<(), AgentError> {
+    async fn request_confirmation(&self, device: OwnedObjectPath, passkey: u32) -> Result<(), AgentError> {
         match self.ask(&device, Prompt::Confirm { passkey }).await {
             Reply::Accept => Ok(()),
             _ => Err(rejected()),
@@ -574,11 +475,7 @@ impl Agent {
         }
     }
 
-    async fn authorize_service(
-        &self,
-        device: OwnedObjectPath,
-        _uuid: String,
-    ) -> Result<(), AgentError> {
+    async fn authorize_service(&self, device: OwnedObjectPath, _uuid: String) -> Result<(), AgentError> {
         // Services of devices the user paired are fine; others aren't asked about.
         match self.bus.props(device.as_str(), DEVICE_IFACE).await {
             Ok(p) if p.bool("Paired").unwrap_or(false) => Ok(()),

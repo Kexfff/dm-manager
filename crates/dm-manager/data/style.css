@@ -201,3 +201,59 @@ row:selected {
 row:selected:hover {
   background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
 }
+
+/* The backdrop behind the dmsh preview: a dark "wallpaper" tinted with the accent. */
+.preview {
+  min-height: 120px;
+  padding: 0 12px;
+  border-radius: 18px;
+  background-color: #141416;
+  background-image: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent-bg-color) 32%, #1c1c1e),
+    #0e0e10 70%
+  );
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 5%);
+}
+
+/* A card asking for something before the page can work (e.g. niri's include). */
+.notice {
+  padding: 18px 20px;
+}
+
+.monospace {
+  font-family: monospace;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background-color: rgb(255 255 255 / 6%);
+}
+
+/* Cursor theme picker. */
+.cursor-themes > flowboxchild {
+  padding: 0;
+  border-radius: 16px;
+  background: none;
+}
+
+.cursor-card {
+  padding: 12px;
+  border-radius: 16px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+  transition: box-shadow 150ms ease;
+}
+
+.cursor-themes > flowboxchild:hover .cursor-card {
+  background-color: #232325;
+}
+
+.cursor-themes > flowboxchild:selected .cursor-card {
+  box-shadow: 0 0 0 2px var(--accent-bg-color);
+}
+
+/* Mid-gray, so both dark and light cursors show. */
+.cursor-preview {
+  padding: 10px 12px;
+  border-radius: 11px;
+  background-color: #5a5a5e;
+}
