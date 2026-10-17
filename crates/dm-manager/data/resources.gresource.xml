@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/kexfff/DmManager">
+    <file>style.css</file>
+    <file alias="icons/scalable/apps/io.github.kexfff.DmManager.svg">../../../dist/io.github.kexfff.DmManager.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-assistant-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-audio-card-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-audio-headphones-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-audio-headset-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-audio-speakers-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-bluetooth-active-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-bluetooth-disabled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-camera-photo-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-camera-video-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-channel-secure-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-computer-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-input-gaming-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-input-keyboard-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-input-mouse-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-input-tablet-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-monitor-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-multimedia-player-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-acquiring-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-disabled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-offline-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-signal-excellent-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-signal-good-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-signal-ok-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-signal-weak-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-network-wireless-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-object-select-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-phone-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-preferences-desktop-appearance-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-preferences-desktop-wallpaper-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-printer-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-shell-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-user-trash-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-video-display-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-view-app-grid-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-view-more-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-view-refresh-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">icons/scalable/actions/dmm-weather-clear-night-symbolic.svg</file>
+  </gresource>
+</gresources>

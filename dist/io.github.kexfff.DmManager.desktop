@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DM Manager
+GenericName=Settings
+Comment=Settings and tools for the DM-Shell desktop
+Exec=dm-manager
+Icon=io.github.kexfff.DmManager
+Terminal=false
+Categories=Settings;System;GTK;
+Keywords=wifi;wi-fi;network;bluetooth;settings;dmsh;niri;
+StartupNotify=true

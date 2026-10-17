@@ -1,0 +1,405 @@
+//! The window: a sidebar of pages and the selected page beside it.
+
+use relm4::adw::prelude::*;
+use relm4::{
+    Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk,
+};
+
+use crate::pages::{self, bluetooth, wifi};
+use crate::theme;
+
+struct PageInfo {
+    id: &'static str,
+    title: &'static str,
+    icon: &'static str,
+    section: usize,
+    /// For pages not built yet: what they will do.
+    soon: Option<&'static str>,
+}
+
+const SECTIONS: [&str; 3] = ["Connections", "System", "Tools"];
+
+const PAGES: &[PageInfo] = &[
+    PageInfo {
+        id: "wifi",
+        title: "Wi-Fi",
+        icon: "dmm-network-wireless-symbolic",
+        section: 0,
+        soon: None,
+    },
+    PageInfo {
+        id: "bluetooth",
+        title: "Bluetooth",
+        icon: "dmm-bluetooth-active-symbolic",
+        section: 0,
+        soon: None,
+    },
+    PageInfo {
+        id: "shell",
+        title: "Shell",
+        icon: "dmm-shell-symbolic",
+        section: 1,
+        soon: Some("Configure dmsh: colors, font, island sizes, the clock and quick controls."),
+    },
+    PageInfo {
+        id: "desktop",
+        title: "Keyboard & Input",
+        icon: "dmm-input-keyboard-symbolic",
+        section: 1,
+        soon: Some("Keyboard layouts, cursor theme and size, touchpad and other niri basics."),
+    },
+    PageInfo {
+        id: "apps",
+        title: "Default Apps",
+        icon: "dmm-view-app-grid-symbolic",
+        section: 1,
+        soon: Some("Pick the browser, file manager, terminal and the apps that open your files."),
+    },
+    PageInfo {
+        id: "appearance",
+        title: "Appearance",
+        icon: "dmm-preferences-desktop-appearance-symbolic",
+        section: 1,
+        soon: Some(
+            "Color scheme, widget style, icons and fonts for Qt and GTK apps — Dolphin included.",
+        ),
+    },
+    PageInfo {
+        id: "power",
+        title: "Power & Sleep",
+        icon: "dmm-weather-clear-night-symbolic",
+        section: 1,
+        soon: Some("When the screen dims, locks and the computer goes to sleep."),
+    },
+    PageInfo {
+        id: "wallpapers",
+        title: "Wallpapers",
+        icon: "dmm-preferences-desktop-wallpaper-symbolic",
+        section: 2,
+        soon: Some("Browse Wallhaven, download wallpapers and set them in one click."),
+    },
+    PageInfo {
+        id: "assistant",
+        title: "Assistant",
+        icon: "dmm-assistant-symbolic",
+        section: 2,
+        soon: Some("An AI assistant that knows your desktop and can change settings for you."),
+    },
+    PageInfo {
+        id: "monitor",
+        title: "System Monitor",
+        icon: "dmm-monitor-symbolic",
+        section: 2,
+        soon: Some("CPU, memory, disks, network and processes at a glance."),
+    },
+];
+
+pub struct App {
+    wifi: Controller<wifi::WifiPage>,
+    bluetooth: Controller<bluetooth::BluetoothPage>,
+    current: usize,
+}
+
+#[derive(Debug)]
+pub enum Msg {
+    Select(u32),
+    Toast(String),
+    Accent(usize),
+}
+
+pub struct Widgets {
+    split: adw::NavigationSplitView,
+    content_page: adw::NavigationPage,
+    stack: gtk::Stack,
+    toasts: adw::ToastOverlay,
+}
+
+impl Component for App {
+    type CommandOutput = ();
+    type Input = Msg;
+    type Output = ();
+    type Init = ();
+    type Root = adw::ApplicationWindow;
+    type Widgets = Widgets;
+
+    fn init_root() -> Self::Root {
+        adw::ApplicationWindow::builder()
+            .title("DM Manager")
+            .icon_name(crate::APP_ID)
+            .default_width(1100)
+            .default_height(720)
+            .width_request(360)
+            .height_request(420)
+            .build()
+    }
+
+    fn init(_: (), root: Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
+        theme::init();
+
+        let wifi = wifi::WifiPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |wifi::Output::Toast(text)| {
+                Msg::Toast(text)
+            });
+        let bluetooth = bluetooth::BluetoothPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |bluetooth::Output::Toast(text)| {
+                Msg::Toast(text)
+            });
+
+        let stack = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(160)
+            .build();
+        stack.add_named(wifi.widget(), Some("wifi"));
+        stack.add_named(bluetooth.widget(), Some("bluetooth"));
+        for page in PAGES {
+            if let Some(description) = page.soon {
+                stack.add_named(
+                    &pages::placeholder(page.icon, page.title, description),
+                    Some(page.id),
+                );
+            }
+        }
+
+        let sidebar = adw::Sidebar::new();
+        for (index, name) in SECTIONS.iter().enumerate() {
+            let section = adw::SidebarSection::new();
+            section.set_title(Some(name));
+            for page in PAGES.iter().filter(|p| p.section == index) {
+                let item = adw::SidebarItem::builder()
+                    .title(page.title)
+                    .icon_name(page.icon)
+                    .build();
+                if page.soon.is_some() {
+                    let soon = gtk::Label::builder()
+                        .label("Soon")
+                        .valign(gtk::Align::Center)
+                        .css_classes(["soon"])
+                        .build();
+                    item.set_suffix(Some(&soon));
+                }
+                section.append(item);
+            }
+            sidebar.append(section);
+        }
+        let s = sender.clone();
+        sidebar.connect_selected_notify(move |sidebar| s.input(Msg::Select(sidebar.selected())));
+
+        let brand = gtk::Label::builder()
+            .label("DM Manager")
+            .css_classes(["brand"])
+            .build();
+        let sidebar_header = adw::HeaderBar::builder().title_widget(&brand).build();
+        sidebar_header.pack_end(&accent_button(&sender));
+        let sidebar_view = adw::ToolbarView::new();
+        sidebar_view.add_top_bar(&sidebar_header);
+        sidebar_view.set_content(Some(&sidebar));
+        let sidebar_page = adw::NavigationPage::builder()
+            .title("DM Manager")
+            .child(&sidebar_view)
+            .build();
+
+        let content_view = adw::ToolbarView::new();
+        content_view.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
+        content_view.set_content(Some(&stack));
+        let content_page = adw::NavigationPage::builder()
+            .title(PAGES[0].title)
+            .child(&content_view)
+            .build();
+
+        let split = adw::NavigationSplitView::builder()
+            .sidebar(&sidebar_page)
+            .content(&content_page)
+            .min_sidebar_width(250.0)
+            .max_sidebar_width(300.0)
+            .sidebar_width_fraction(0.28)
+            .build();
+        let toasts = adw::ToastOverlay::new();
+        toasts.set_child(Some(&split));
+        root.set_content(Some(&toasts));
+
+        let narrow = adw::Breakpoint::new(
+            adw::BreakpointCondition::parse("max-width: 560sp").expect("valid condition"),
+        );
+        narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+        root.add_breakpoint(narrow);
+
+        if let Some(index) = std::env::var("DMM_PAGE")
+            .ok()
+            .and_then(|id| PAGES.iter().position(|p| p.id == id))
+        {
+            sidebar.set_selected(index as u32);
+        }
+        if let Some(path) = std::env::var_os("DMM_SCREENSHOT") {
+            stack.set_transition_type(gtk::StackTransitionType::None);
+            screenshot_later(&root, path.into());
+        }
+
+        wifi.emit(wifi::Input::Visible(true));
+        let model = Self {
+            wifi,
+            bluetooth,
+            current: 0,
+        };
+        let widgets = Widgets {
+            split,
+            content_page,
+            stack,
+            toasts,
+        };
+        ComponentParts { model, widgets }
+    }
+
+    fn update_with_view(
+        &mut self,
+        w: &mut Widgets,
+        msg: Msg,
+        _: ComponentSender<Self>,
+        _: &Self::Root,
+    ) {
+        match msg {
+            Msg::Select(index) => {
+                let Some(page) = PAGES.get(index as usize) else {
+                    return;
+                };
+                w.stack.set_visible_child_name(page.id);
+                w.content_page.set_title(page.title);
+                w.split.set_show_content(true);
+                if self.current != index as usize {
+                    self.set_visible(self.current, false);
+                    self.current = index as usize;
+                    self.set_visible(self.current, true);
+                }
+            }
+            Msg::Toast(text) => {
+                let toast = adw::Toast::builder()
+                    .title(text)
+                    .use_markup(false)
+                    .timeout(4)
+                    .build();
+                w.toasts.add_toast(toast);
+            }
+            Msg::Accent(index) => {
+                let accent = &theme::ACCENTS[index];
+                theme::apply_accent(accent);
+                theme::save_accent(accent);
+            }
+        }
+    }
+}
+
+impl App {
+    /// Tells a page it was shown or hidden (so it can scan, or stop searching).
+    fn set_visible(&self, index: usize, visible: bool) {
+        match PAGES[index].id {
+            "wifi" => self.wifi.emit(wifi::Input::Visible(visible)),
+            "bluetooth" => self.bluetooth.emit(bluetooth::Input::Visible(visible)),
+            _ => {}
+        }
+    }
+}
+
+/// Development aid: renders the window to a PNG once it has settled, then quits.
+/// `DMM_SCREENSHOT=/tmp/shot.png DMM_PAGE=bluetooth dm-manager`
+fn screenshot_later(window: &adw::ApplicationWindow, path: std::path::PathBuf) {
+    let window = window.clone();
+    let mut attempts = 0;
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(2500), move || {
+        // The window's content: a toplevel's own paintable draws nothing.
+        let content = window.content().expect("window content");
+        let paintable = gtk::WidgetPaintable::new(Some(&content));
+        let (width, height) = (content.width() as f32, content.height() as f32);
+        let drawn = gtk::Snapshot::new();
+        paintable.snapshot(&drawn, width as f64, height as f64);
+        let Some(drawn) = drawn.to_node() else {
+            // Not drawn yet; try again.
+            attempts += 1;
+            return if attempts < 10 {
+                gtk::glib::ControlFlow::Continue
+            } else {
+                gtk::glib::ControlFlow::Break
+            };
+        };
+        // The window draws its background itself, not its content.
+        let snapshot = gtk::Snapshot::new();
+        let background = gtk::gdk::RGBA::parse("#0c0c0e").expect("valid color");
+        snapshot.append_color(
+            &background,
+            &gtk::graphene::Rect::new(0.0, 0.0, width, height),
+        );
+        snapshot.append_node(&drawn);
+        let node = snapshot.to_node().expect("a background at least");
+        let renderer = gtk::gsk::CairoRenderer::new();
+        match renderer.realize_for_display(&WidgetExt::display(&window)) {
+            Ok(()) => {
+                if let Err(e) = renderer.render_texture(&node, None).save_to_png(&path) {
+                    log::error!("can't save {}: {e}", path.display());
+                }
+                renderer.unrealize();
+            }
+            Err(e) => log::error!("can't render the window: {e}"),
+        }
+        if let Some(app) = window.application() {
+            app.quit();
+        }
+        gtk::glib::ControlFlow::Break
+    });
+}
+
+/// The colored dot in the sidebar header that opens the accent picker.
+fn accent_button(sender: &ComponentSender<App>) -> gtk::MenuButton {
+    let grid = gtk::Grid::builder()
+        .column_spacing(10)
+        .row_spacing(10)
+        .build();
+    let selected = theme::accent_index(theme::saved_accent());
+    let mut first: Option<gtk::ToggleButton> = None;
+    for (index, accent) in theme::ACCENTS.iter().enumerate() {
+        let check = gtk::Image::from_icon_name("dmm-object-select-symbolic");
+        let swatch = gtk::ToggleButton::builder()
+            .child(&check)
+            .tooltip_text(accent.name)
+            .css_classes(["swatch", &format!("swatch-{}", accent.id)])
+            .active(index == selected)
+            .build();
+        swatch.set_group(first.as_ref());
+        let s = sender.clone();
+        swatch.connect_toggled(move |b| {
+            if b.is_active() {
+                s.input(Msg::Accent(index));
+            }
+        });
+        grid.attach(&swatch, (index % 5) as i32, (index / 5) as i32, 1, 1);
+        first.get_or_insert(swatch);
+    }
+
+    let title = gtk::Label::builder()
+        .label("Accent Color")
+        .xalign(0.0)
+        .css_classes(["heading"])
+        .build();
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(10)
+        .margin_bottom(10)
+        .margin_start(10)
+        .margin_end(10)
+        .build();
+    content.append(&title);
+    content.append(&grid);
+    let popover = gtk::Popover::builder().child(&content).build();
+
+    let dot = gtk::Box::builder()
+        .css_classes(["accent-dot"])
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+    gtk::MenuButton::builder()
+        .child(&dot)
+        .popover(&popover)
+        .tooltip_text("Accent color")
+        .css_classes(["flat", "circular"])
+        .build()
+}
