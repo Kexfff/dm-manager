@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 futures-util = "0.3"
+roxmltree = "0.21"
+miette = { version = "7", default-features = false }
+kdl = { version = "6.7", default-features = false, features = ["span", "v1-fallback"] }
 log = "0.4"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros", "process"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
