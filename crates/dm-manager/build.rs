@@ -1,4 +1,5 @@
-//! Bundles the stylesheet, every icon in data/icons and the app icon into a GResource.
+//! Bundles the stylesheet, every icon in data/icons and the app icon (from dist/icons) into a
+//! GResource.
 
 use std::fmt::Write;
 use std::path::PathBuf;
@@ -16,11 +17,14 @@ fn main() {
     let mut xml = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<gresources>\n  <gresource prefix=\"/io/github/kexfff/DmManager\">\n    <file>style.css</file>\n",
     );
-    writeln!(
-        xml,
-        "    <file alias=\"icons/scalable/apps/io.github.kexfff.DmManager.svg\">../../../dist/io.github.kexfff.DmManager.svg</file>"
-    )
-    .unwrap();
+    // The app icon, for the window: sizes laid out like a hicolor theme.
+    for size in ["32x32", "48x48", "64x64", "128x128", "256x256"] {
+        writeln!(
+            xml,
+            "    <file alias=\"icons/{size}/apps/io.github.kexfff.DmManager.png\">../../../dist/icons/{size}/io.github.kexfff.DmManager.png</file>"
+        )
+        .unwrap();
+    }
     for icon in icons {
         writeln!(xml, "    <file preprocess=\"xml-stripblanks\">icons/scalable/actions/{icon}</file>").unwrap();
     }
@@ -29,6 +33,6 @@ fn main() {
     std::fs::write(&manifest, xml).unwrap();
 
     println!("cargo::rerun-if-changed=data");
-    println!("cargo::rerun-if-changed=../../dist/io.github.kexfff.DmManager.svg");
+    println!("cargo::rerun-if-changed=../../dist/icons");
     glib_build_tools::compile_resources(&["data"], manifest.to_str().unwrap(), "resources.gresource");
 }

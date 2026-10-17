@@ -56,8 +56,9 @@ git clone https://github.com/Kexfff/dm-manager && cd dm-manager
 ./install.sh
 ```
 
-This builds a release binary and installs it to `~/.local/bin`, with a desktop entry and an
-icon. `./install.sh --uninstall` removes them.
+This checks for the build requirements, builds a release binary and installs it to
+`~/.local/bin`, with a launcher entry and the icon, so DM Manager shows up in your app launcher.
+`./install.sh --prefix DIR` installs elsewhere; `./install.sh --uninstall` removes it all.
 
 Requirements: Rust, GTK 4, libadwaita 1.9 or newer, and the services the pages talk to:
 NetworkManager for Wi-Fi and BlueZ (`bluetooth.service`) for Bluetooth. A page whose service is
@@ -73,7 +74,7 @@ crates/
                 ini.rs (in-place editing)
   dm-manager/   the app: app.rs (window, sidebar), pages/, widgets.rs, theme.rs
     data/       style.css and bundled symbolic icons (compiled into a GResource)
-dist/           desktop entry and app icon
+dist/           launcher entry, and the app icon (icon.png, and the sizes made from it in icons/)
 ```
 
 Each backend is an async loop: it takes requests from a channel and reports state snapshots
