@@ -4,12 +4,17 @@
 //! No GTK here. The D-Bus backends are async `run` loops that take requests from a channel
 //! and report state through a callback, so the UI only ever sees plain data.
 
+pub mod appearance;
+pub mod apps;
 pub mod bluetooth;
 mod bus;
 pub mod dmsh;
+pub mod idle;
+pub mod ini;
 pub mod kdl_text;
 pub mod network;
 pub mod niri;
+pub mod power;
 
 pub use bus::describe_error;
 

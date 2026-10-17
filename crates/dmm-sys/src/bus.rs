@@ -106,6 +106,20 @@ impl Props {
         }
     }
 
+    pub fn i64(&self, key: &str) -> Option<i64> {
+        match self.value(key)? {
+            Value::I64(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn f64(&self, key: &str) -> Option<f64> {
+        match self.value(key)? {
+            Value::F64(n) => Some(*n),
+            _ => None,
+        }
+    }
+
     pub fn i16(&self, key: &str) -> Option<i16> {
         match self.value(key)? {
             Value::I16(n) => Some(*n),

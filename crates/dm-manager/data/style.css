@@ -257,3 +257,59 @@ row:selected:hover {
   border-radius: 11px;
   background-color: #5a5a5e;
 }
+
+/* Cards in a horizontal strip: color schemes, icon themes. */
+.carousel > viewport > box {
+  padding: 2px;
+}
+
+.theme-card {
+  padding: 10px;
+  border-radius: 16px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+}
+
+.theme-card:hover {
+  background-color: #232325;
+}
+
+.theme-card.selected {
+  box-shadow: 0 0 0 2px var(--accent-bg-color);
+}
+
+.icon-preview {
+  padding: 10px 12px;
+  border-radius: 11px;
+  background-color: rgb(255 255 255 / 5%);
+}
+
+.swatch.small {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.gnome-accent-blue { background: #3584e4; color: #fff; }
+.gnome-accent-teal { background: #2190a4; color: #fff; }
+.gnome-accent-green { background: #3a944a; color: #fff; }
+.gnome-accent-yellow { background: #c88800; color: #fff; }
+.gnome-accent-orange { background: #ed5b00; color: #fff; }
+.gnome-accent-red { background: #e62d42; color: #fff; }
+.gnome-accent-pink { background: #d56199; color: #fff; }
+.gnome-accent-purple { background: #9141ac; color: #fff; }
+.gnome-accent-slate { background: #6f8396; color: #fff; }
+
+/* Power modes: one wide segmented control. */
+.power-modes {
+  min-height: 52px;
+  border-radius: 16px;
+  padding: 4px;
+}
+
+.power-modes > toggle {
+  border-radius: 12px;
+}
+
+.power-modes > toggle:checked {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
+}

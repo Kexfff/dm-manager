@@ -1,5 +1,8 @@
+pub mod appearance;
+pub mod apps;
 pub mod bluetooth;
 pub mod input;
+pub mod power;
 pub mod shell;
 pub mod wifi;
 

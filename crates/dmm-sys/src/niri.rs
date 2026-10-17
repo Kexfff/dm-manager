@@ -31,6 +31,7 @@ pub enum Area {
     Touchpad,
     Mouse,
     Cursor,
+    Environment,
 }
 
 impl Area {
@@ -41,6 +42,7 @@ impl Area {
             Self::Touchpad => &["input", "touchpad"],
             Self::Mouse => &["input", "mouse"],
             Self::Cursor => &["cursor"],
+            Self::Environment => &["environment"],
         }
     }
 
@@ -76,6 +78,16 @@ impl Section {
     }
 }
 
+/// A key bind as written in its file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bind {
+    /// The program it starts, for `spawn` binds.
+    pub spawn: Option<String>,
+    raw: String,
+    /// Where the action node is in `raw`.
+    action: (usize, usize),
+}
+
 /// The input and cursor settings in effect, read from the whole niri config.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InputConfig {
@@ -84,6 +96,10 @@ pub struct InputConfig {
     pub touchpad: Section,
     pub mouse: Section,
     pub cursor: Section,
+    /// Environment variables niri sets for what it starts (a null value unsets one).
+    pub environment: Section,
+    /// Key binds in effect, by key (`Mod+T`).
+    pub binds: BTreeMap<String, Bind>,
     /// The main config includes dm-manager's file.
     pub included: bool,
     /// The main config couldn't be read; nothing above is reliable.
@@ -98,6 +114,7 @@ impl InputConfig {
             Area::Touchpad => &self.touchpad,
             Area::Mouse => &self.mouse,
             Area::Cursor => &self.cursor,
+            Area::Environment => &self.environment,
         }
     }
 
@@ -207,6 +224,25 @@ fn read_into(path: &Path, own: &Path, config: &mut InputConfig, depth: usize) ->
                 }
             }
             "cursor" => merge(&mut config.cursor, node),
+            "environment" => merge(&mut config.environment, node),
+            "binds" => {
+                for bind in node.children().map(|c| c.nodes()).unwrap_or_default() {
+                    let Some(action) = bind.children().and_then(|c| c.nodes().first()) else { continue };
+                    let (start, end) = (bind.span().offset(), bind.span().offset() + bind.span().len());
+                    let (a_start, a_end) = (action.span().offset(), action.span().offset() + action.span().len());
+                    let spawn = (action.name().value() == "spawn")
+                        .then(|| action.entries().first().and_then(|e| e.value().as_string().map(String::from)))
+                        .flatten();
+                    config.binds.insert(
+                        bind.name().value().to_string(),
+                        Bind {
+                            spawn,
+                            raw: file.text()[start..end].to_string(),
+                            action: (a_start - start, a_end - start),
+                        },
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -309,6 +345,14 @@ impl NiriFile {
             Some(v) => self.file.set(&full, None, &v),
             None => self.file.remove(&full),
         }
+    }
+
+    /// Makes the bind for `key` start `program` instead, keeping its key and options.
+    pub fn rebind_spawn(&mut self, key: &str, bind: &Bind, program: &str) -> Result<(), String> {
+        let action = format!("spawn {}", Value::Str(program.into()).repr(crate::kdl_text::Version::V1));
+        let raw = format!("{}{action}{}", &bind.raw[..bind.action.0], &bind.raw[bind.action.1..]);
+        self.file.remove(&["binds", key])?;
+        self.file.insert_node_text(&["binds"], &raw)
     }
 
     /// Checks the file with `niri validate`, then replaces it (niri reloads it on its own).
@@ -704,6 +748,24 @@ cursor {
         assert!(own.text().ends_with("cursor {\n    hide-when-typing false\n}\n"), "{}", own.text());
         own.set(&c, Area::Cursor, "hide-when-typing", Some(Value::Bool(true))).unwrap();
         assert!(own.text().ends_with("cursor {\n    hide-when-typing\n}\n"), "{}", own.text());
+    }
+
+    #[test]
+    fn rebinds_a_spawn_key() {
+        let main = "binds {\n    Mod+T hotkey-overlay-title=\"Terminal\" { spawn \"kitty\"; }\n    Mod+E { spawn \"dolphin\"; }\n}\n";
+        let c = effective_of(&[("config.kdl", main)]);
+        let bind = &c.binds["Mod+T"];
+        assert_eq!(bind.spawn.as_deref(), Some("kitty"));
+        let mut own = NiriFile { path: PathBuf::from("/nonexistent"), file: KdlText::parse_v1(HEADER.into()).unwrap() };
+        own.rebind_spawn("Mod+T", bind, "alacritty").unwrap();
+        assert!(
+            own.text().ends_with("binds {\n    Mod+T hotkey-overlay-title=\"Terminal\" { spawn \"alacritty\"; }\n}\n"),
+            "{}",
+            own.text()
+        );
+        // Again: replaces, doesn't duplicate.
+        own.rebind_spawn("Mod+T", bind, "foot").unwrap();
+        assert_eq!(own.text().matches("Mod+T").count(), 1);
     }
 
     #[test]

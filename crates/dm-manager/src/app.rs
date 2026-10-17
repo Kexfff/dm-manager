@@ -3,7 +3,7 @@
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk};
 
-use crate::pages::{self, bluetooth, input, shell, wifi};
+use crate::pages::{self, appearance, apps, bluetooth, input, power, shell, wifi};
 use crate::theme;
 
 struct PageInfo {
@@ -22,27 +22,15 @@ const PAGES: &[PageInfo] = &[
     PageInfo { id: "bluetooth", title: "Bluetooth", icon: "dmm-bluetooth-active-symbolic", section: 0, soon: None },
     PageInfo { id: "shell", title: "Shell", icon: "dmm-shell-symbolic", section: 1, soon: None },
     PageInfo { id: "input", title: "Keyboard & Input", icon: "dmm-input-keyboard-symbolic", section: 1, soon: None },
-    PageInfo {
-        id: "apps",
-        title: "Default Apps",
-        icon: "dmm-view-app-grid-symbolic",
-        section: 1,
-        soon: Some("Pick the browser, file manager, terminal and the apps that open your files."),
-    },
+    PageInfo { id: "apps", title: "Default Apps", icon: "dmm-view-app-grid-symbolic", section: 1, soon: None },
     PageInfo {
         id: "appearance",
         title: "Appearance",
         icon: "dmm-preferences-desktop-appearance-symbolic",
         section: 1,
-        soon: Some("Color scheme, widget style, icons and fonts for Qt and GTK apps — Dolphin included."),
+        soon: None,
     },
-    PageInfo {
-        id: "power",
-        title: "Power & Sleep",
-        icon: "dmm-weather-clear-night-symbolic",
-        section: 1,
-        soon: Some("When the screen dims, locks and the computer goes to sleep."),
-    },
+    PageInfo { id: "power", title: "Power & Sleep", icon: "dmm-weather-clear-night-symbolic", section: 1, soon: None },
     PageInfo {
         id: "wallpapers",
         title: "Wallpapers",
@@ -71,6 +59,9 @@ pub struct App {
     bluetooth: Controller<bluetooth::BluetoothPage>,
     shell: Controller<shell::ShellPage>,
     input: Controller<input::InputPage>,
+    apps: Controller<apps::AppsPage>,
+    appearance: Controller<appearance::AppearancePage>,
+    power: Controller<power::PowerPage>,
     current: usize,
 }
 
@@ -122,6 +113,15 @@ impl Component for App {
         let input = input::InputPage::builder()
             .launch(())
             .forward(sender.input_sender(), |input::Output::Toast(text)| Msg::Toast(text));
+        let apps = apps::AppsPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |apps::Output::Toast(text)| Msg::Toast(text));
+        let appearance = appearance::AppearancePage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |appearance::Output::Toast(text)| Msg::Toast(text));
+        let power = power::PowerPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |power::Output::Toast(text)| Msg::Toast(text));
 
         let stack =
             gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(160).build();
@@ -129,6 +129,9 @@ impl Component for App {
         stack.add_named(bluetooth.widget(), Some("bluetooth"));
         stack.add_named(shell.widget(), Some("shell"));
         stack.add_named(input.widget(), Some("input"));
+        stack.add_named(apps.widget(), Some("apps"));
+        stack.add_named(appearance.widget(), Some("appearance"));
+        stack.add_named(power.widget(), Some("power"));
         for page in PAGES {
             if let Some(description) = page.soon {
                 stack.add_named(&pages::placeholder(page.icon, page.title, description), Some(page.id));
@@ -191,7 +194,7 @@ impl Component for App {
         }
 
         wifi.emit(wifi::Input::Visible(true));
-        let model = Self { wifi, bluetooth, shell, input, current: 0 };
+        let model = Self { wifi, bluetooth, shell, input, apps, appearance, power, current: 0 };
         let widgets = Widgets { split, content_page, stack, toasts };
         ComponentParts { model, widgets }
     }
@@ -232,6 +235,9 @@ impl App {
             "bluetooth" => self.bluetooth.emit(bluetooth::Input::Visible(visible)),
             "shell" => self.shell.emit(shell::Input::Visible(visible)),
             "input" => self.input.emit(input::Input::Visible(visible)),
+            "apps" => self.apps.emit(apps::Input::Visible(visible)),
+            "appearance" => self.appearance.emit(appearance::Input::Visible(visible)),
+            "power" => self.power.emit(power::Input::Visible(visible)),
             _ => {}
         }
     }
