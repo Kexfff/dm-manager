@@ -313,3 +313,50 @@ row:selected:hover {
 .power-modes > toggle:checked {
   background-color: color-mix(in srgb, var(--accent-bg-color) 30%, transparent);
 }
+
+/* Overview: the computer's name under the distribution's logo, and spec cards. */
+.overview-hero {
+  padding: 20px 0 8px;
+}
+
+.overview-logo {
+  margin-bottom: 8px;
+  -gtk-icon-shadow: 0 6px 24px color-mix(in srgb, var(--accent-bg-color) 35%, transparent);
+}
+
+.overview-host {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.small-pill {
+  padding: 6px 16px;
+  min-height: 0;
+}
+
+.spec-grid > flowboxchild {
+  padding: 0;
+}
+
+.spec-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 4%);
+}
+
+.spec-value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.spec-card levelbar block.filled {
+  background-color: var(--accent-bg-color);
+  border-radius: 99px;
+}
+
+.spec-card levelbar trough {
+  border-radius: 99px;
+  min-height: 6px;
+}

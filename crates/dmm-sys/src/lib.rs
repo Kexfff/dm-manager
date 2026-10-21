@@ -15,6 +15,7 @@ pub mod kdl_text;
 pub mod network;
 pub mod niri;
 pub mod power;
+pub mod sysinfo;
 
 pub use bus::describe_error;
 

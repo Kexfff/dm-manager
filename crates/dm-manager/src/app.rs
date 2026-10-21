@@ -3,7 +3,7 @@
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk};
 
-use crate::pages::{self, appearance, apps, bluetooth, input, power, shell, wifi};
+use crate::pages::{self, appearance, apps, bluetooth, input, overview, power, shell, wifi};
 use crate::theme;
 
 struct PageInfo {
@@ -15,46 +15,49 @@ struct PageInfo {
     soon: Option<&'static str>,
 }
 
-const SECTIONS: [&str; 3] = ["Connections", "System", "Tools"];
+/// Sidebar sections; the first, with the overview, has no title.
+const SECTIONS: [Option<&str>; 4] = [None, Some("Connections"), Some("System"), Some("Tools")];
 
 const PAGES: &[PageInfo] = &[
-    PageInfo { id: "wifi", title: "Wi-Fi", icon: "dmm-network-wireless-symbolic", section: 0, soon: None },
-    PageInfo { id: "bluetooth", title: "Bluetooth", icon: "dmm-bluetooth-active-symbolic", section: 0, soon: None },
-    PageInfo { id: "shell", title: "Shell", icon: "dmm-shell-symbolic", section: 1, soon: None },
-    PageInfo { id: "input", title: "Keyboard & Input", icon: "dmm-input-keyboard-symbolic", section: 1, soon: None },
-    PageInfo { id: "apps", title: "Default Apps", icon: "dmm-view-app-grid-symbolic", section: 1, soon: None },
+    PageInfo { id: "overview", title: "Overview", icon: "dmm-computer-symbolic", section: 0, soon: None },
+    PageInfo { id: "wifi", title: "Wi-Fi", icon: "dmm-network-wireless-symbolic", section: 1, soon: None },
+    PageInfo { id: "bluetooth", title: "Bluetooth", icon: "dmm-bluetooth-active-symbolic", section: 1, soon: None },
+    PageInfo { id: "shell", title: "Shell", icon: "dmm-shell-symbolic", section: 2, soon: None },
+    PageInfo { id: "input", title: "Keyboard & Input", icon: "dmm-input-keyboard-symbolic", section: 2, soon: None },
+    PageInfo { id: "apps", title: "Default Apps", icon: "dmm-view-app-grid-symbolic", section: 2, soon: None },
     PageInfo {
         id: "appearance",
         title: "Appearance",
         icon: "dmm-preferences-desktop-appearance-symbolic",
-        section: 1,
+        section: 2,
         soon: None,
     },
-    PageInfo { id: "power", title: "Power & Sleep", icon: "dmm-weather-clear-night-symbolic", section: 1, soon: None },
+    PageInfo { id: "power", title: "Power & Sleep", icon: "dmm-weather-clear-night-symbolic", section: 2, soon: None },
     PageInfo {
         id: "wallpapers",
         title: "Wallpapers",
         icon: "dmm-preferences-desktop-wallpaper-symbolic",
-        section: 2,
+        section: 3,
         soon: Some("Browse Wallhaven, download wallpapers and set them in one click."),
     },
     PageInfo {
         id: "assistant",
         title: "Assistant",
         icon: "dmm-assistant-symbolic",
-        section: 2,
+        section: 3,
         soon: Some("An AI assistant that knows your desktop and can change settings for you."),
     },
     PageInfo {
         id: "monitor",
         title: "System Monitor",
         icon: "dmm-monitor-symbolic",
-        section: 2,
+        section: 3,
         soon: Some("CPU, memory, disks, network and processes at a glance."),
     },
 ];
 
 pub struct App {
+    overview: Controller<overview::OverviewPage>,
     wifi: Controller<wifi::WifiPage>,
     bluetooth: Controller<bluetooth::BluetoothPage>,
     shell: Controller<shell::ShellPage>,
@@ -101,6 +104,9 @@ impl Component for App {
     fn init(_: (), root: Self::Root, sender: ComponentSender<Self>) -> ComponentParts<Self> {
         theme::init();
 
+        let overview = overview::OverviewPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |overview::Output::Toast(text)| Msg::Toast(text));
         let wifi = wifi::WifiPage::builder()
             .launch(())
             .forward(sender.input_sender(), |wifi::Output::Toast(text)| Msg::Toast(text));
@@ -125,6 +131,7 @@ impl Component for App {
 
         let stack =
             gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(160).build();
+        stack.add_named(overview.widget(), Some("overview"));
         stack.add_named(wifi.widget(), Some("wifi"));
         stack.add_named(bluetooth.widget(), Some("bluetooth"));
         stack.add_named(shell.widget(), Some("shell"));
@@ -141,7 +148,7 @@ impl Component for App {
         let sidebar = adw::Sidebar::new();
         for (index, name) in SECTIONS.iter().enumerate() {
             let section = adw::SidebarSection::new();
-            section.set_title(Some(name));
+            section.set_title(*name);
             for page in PAGES.iter().filter(|p| p.section == index) {
                 let item = adw::SidebarItem::builder().title(page.title).icon_name(page.icon).build();
                 if page.soon.is_some() {
@@ -193,8 +200,7 @@ impl Component for App {
             screenshot_later(&root, path.into());
         }
 
-        wifi.emit(wifi::Input::Visible(true));
-        let model = Self { wifi, bluetooth, shell, input, apps, appearance, power, current: 0 };
+        let model = Self { overview, wifi, bluetooth, shell, input, apps, appearance, power, current: 0 };
         let widgets = Widgets { split, content_page, stack, toasts };
         ComponentParts { model, widgets }
     }
@@ -231,6 +237,7 @@ impl App {
     /// Tells a page it was shown or hidden (so it can scan, or stop searching).
     fn set_visible(&self, index: usize, visible: bool) {
         match PAGES[index].id {
+            "overview" => self.overview.emit(overview::Input::Visible(visible)),
             "wifi" => self.wifi.emit(wifi::Input::Visible(visible)),
             "bluetooth" => self.bluetooth.emit(bluetooth::Input::Visible(visible)),
             "shell" => self.shell.emit(shell::Input::Visible(visible)),
