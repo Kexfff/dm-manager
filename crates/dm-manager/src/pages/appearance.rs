@@ -1,6 +1,7 @@
 //! Appearance: Qt/KDE apps (Dolphin) and GTK apps, plus the icon theme and fonts they share.
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use dmm_sys::appearance::{self, ColorScheme, Current, SchemeColors};
@@ -44,6 +45,8 @@ const SAMPLE_ICONS: &[&str] = &["folder", "text-x-generic", "image-x-generic", "
 
 pub struct AppearancePage {
     current: Current,
+    /// Accent colors found in the wallpaper.
+    palette: Vec<(u8, u8, u8)>,
     schemes: Vec<ColorScheme>,
     busy: bool,
 }
@@ -71,6 +74,8 @@ pub enum Input {
 #[derive(Debug)]
 pub enum Cmd {
     Applied(Result<String, String>),
+    /// The wallpaper and the accent colors found in it.
+    Palette(Option<PathBuf>, Vec<(u8, u8, u8)>),
 }
 
 #[derive(Debug)]
@@ -80,6 +85,7 @@ pub enum Output {
 
 pub struct Widgets {
     hero: Hero,
+    wallpaper: WallpaperColors,
     bindings: Bindings<(Current, Vec<ColorScheme>)>,
 }
 
@@ -110,7 +116,8 @@ impl Component for AppearancePage {
             .description("Dolphin, Kate, Ark and other Qt apps")
             .build();
         group.add(&scheme_carousel(&schemes, &sender, &mut bindings));
-        group.add(&kde_accent(&sender, &mut bindings));
+        let (accent_card, wallpaper) = kde_accent(&sender, &mut bindings);
+        group.add(&accent_card);
         let list = boxed_list();
         let styles = appearance::widget_styles();
         list.append(&choice(
@@ -164,8 +171,9 @@ impl Component for AppearancePage {
         group.add(&font_row("Monospace", true, &sender, &mut bindings));
         root.add(&group);
 
-        let model = Self { current: appearance::current(), schemes, busy: false };
-        let mut widgets = Widgets { hero, bindings };
+        let model = Self { current: appearance::current(), schemes, busy: false, palette: Vec::new() };
+        let mut widgets = Widgets { hero, wallpaper, bindings };
+        read_palette(&sender);
         model.show(&mut widgets);
         ComponentParts { model, widgets }
     }
@@ -175,6 +183,8 @@ impl Component for AppearancePage {
             if visible {
                 self.current = appearance::current();
                 self.show(w);
+                // The wallpaper may have changed (the Wallpapers page, Ctrl+Alt+T).
+                read_palette(&sender);
             }
             return;
         }
@@ -186,7 +196,17 @@ impl Component for AppearancePage {
     }
 
     fn update_cmd_with_view(&mut self, w: &mut Widgets, cmd: Cmd, sender: ComponentSender<Self>, _: &Self::Root) {
-        let Cmd::Applied(result) = cmd;
+        let result = match cmd {
+            Cmd::Applied(result) => result,
+            Cmd::Palette(image, colors) => {
+                if colors != self.palette || w.wallpaper.buttons.is_empty() != colors.is_empty() {
+                    w.wallpaper.set(image.as_deref(), &colors, &sender);
+                }
+                self.palette = colors;
+                self.show(w);
+                return;
+            }
+        };
         self.busy = false;
         match result {
             Ok(message) if !message.is_empty() => toast(&sender, message),
@@ -213,6 +233,92 @@ impl AppearancePage {
         let parts: Vec<String> = [Some(scheme), style, icons].into_iter().flatten().collect();
         w.hero.set_subtitle(&parts.join(" · "));
         w.bindings.refresh(&(c.clone(), self.schemes.clone()));
+        w.wallpaper.select(c.accent_color);
+    }
+}
+
+/// Finds accent colors in the current wallpaper (off the UI thread: it decodes the image).
+fn read_palette(sender: &ComponentSender<AppearancePage>) {
+    sender.oneshot_command(async {
+        let found = tokio::task::spawn_blocking(|| {
+            let image = dmm_sys::wallpaper::current().into_iter().next()?;
+            let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(&image, 96, 96, true).ok()?;
+            let bytes = pixbuf.read_pixel_bytes();
+            let (stride, channels) = (pixbuf.rowstride() as usize, pixbuf.n_channels() as usize);
+            let mut pixels = Vec::new();
+            for y in 0..pixbuf.height() as usize {
+                for x in 0..pixbuf.width() as usize {
+                    let i = y * stride + x * channels;
+                    if let Some(p) = bytes.get(i..i + 3) {
+                        pixels.push((p[0], p[1], p[2]));
+                    }
+                }
+            }
+            Some((image, dmm_sys::palette::accents(&pixels, 6)))
+        })
+        .await
+        .ok()
+        .flatten();
+        match found {
+            Some((image, colors)) => Cmd::Palette(Some(image), colors),
+            None => Cmd::Palette(None, Vec::new()),
+        }
+    });
+}
+
+/// The accent card's row of colors from the wallpaper.
+struct WallpaperColors {
+    row: gtk::Box,
+    thumbnail: gtk::Picture,
+    swatches: adw::WrapBox,
+    /// The toggle group the swatches join (with the presets).
+    group: gtk::ToggleButton,
+    custom: gtk::ColorDialogButton,
+    quiet: Rc<std::cell::Cell<bool>>,
+    buttons: Vec<((u8, u8, u8), gtk::ToggleButton)>,
+}
+
+impl WallpaperColors {
+    fn set(
+        &mut self,
+        image: Option<&std::path::Path>,
+        colors: &[(u8, u8, u8)],
+        sender: &ComponentSender<AppearancePage>,
+    ) {
+        for (_, button) in self.buttons.drain(..) {
+            self.swatches.remove(&button);
+        }
+        for color in colors {
+            let swatch = color_swatch(*color, &appearance::hex(*color));
+            swatch.set_group(Some(&self.group));
+            let (s, q, color) = (sender.clone(), self.quiet.clone(), *color);
+            swatch.connect_toggled(move |b| {
+                if b.is_active() && !q.get() {
+                    s.input(Input::KdeAccent(Some(color)));
+                }
+            });
+            self.swatches.append(&swatch);
+            self.buttons.push((color, swatch));
+        }
+        if let Some(image) = image {
+            self.thumbnail.set_filename(Some(image));
+        }
+        self.row.set_visible(!colors.is_empty());
+    }
+
+    /// Marks the wallpaper color that's the accent, if one is.
+    fn select(&self, accent: Option<(u8, u8, u8)>) {
+        self.quiet.set(true);
+        let mut matched = false;
+        for (color, button) in &self.buttons {
+            let on = accent == Some(*color);
+            button.set_active(on);
+            matched |= on;
+        }
+        if matched {
+            self.custom.remove_css_class("chosen");
+        }
+        self.quiet.set(false);
     }
 }
 
@@ -471,7 +577,7 @@ fn color_swatch(color: (u8, u8, u8), tooltip: &str) -> gtk::ToggleButton {
 }
 
 /// The Qt/KDE accent: a preview of the icon theme's folder in it, and the choices.
-fn kde_accent(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> gtk::Box {
+fn kde_accent(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> (gtk::Box, WallpaperColors) {
     let preview = gtk::Image::builder().pixel_size(56).valign(gtk::Align::Center).build();
     let title = gtk::Label::builder().label("Accent Color").xalign(0.0).css_classes(["heading"]).build();
     let subtitle = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label", "caption"]).build();
@@ -521,10 +627,40 @@ fn kde_accent(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<
     });
     swatches.append(&custom);
 
+    // Colors from the wallpaper, filled in once they're found.
+    let thumbnail = gtk::Picture::builder()
+        .content_fit(gtk::ContentFit::Cover)
+        .can_shrink(true)
+        .width_request(46)
+        .height_request(28)
+        .valign(gtk::Align::Center)
+        .overflow(gtk::Overflow::Hidden)
+        .css_classes(["wallpaper-thumb"])
+        .build();
+    let wall_swatches = adw::WrapBox::builder().child_spacing(6).line_spacing(6).build();
+    let wall_label =
+        gtk::Label::builder().label("From your wallpaper").xalign(0.0).css_classes(["dim-label", "caption"]).build();
+    let wall_column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+    wall_column.append(&wall_label);
+    wall_column.append(&wall_swatches);
+    let wall_row = gtk::Box::builder().spacing(10).margin_top(10).visible(false).build();
+    wall_row.append(&thumbnail);
+    wall_row.append(&wall_column);
+    let wallpaper = WallpaperColors {
+        row: wall_row.clone(),
+        thumbnail,
+        swatches: wall_swatches,
+        group: scheme.clone(),
+        custom: custom.clone(),
+        quiet: quiet.clone(),
+        buttons: Vec::new(),
+    };
+
     let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
     text.append(&title);
     text.append(&subtitle);
     text.append(&swatches);
+    text.append(&wall_row);
     let card = gtk::Box::builder().spacing(16).css_classes(["card", "accent-card"]).margin_top(12).build();
     card.append(&preview);
     card.append(&text);
@@ -561,7 +697,7 @@ fn kde_accent(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<
             "Selections and highlights in Qt and KDE apps (Breeze icons also use it for folders)"
         });
     });
-    card
+    (card, wallpaper)
 }
 
 fn accent_row(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> adw::ActionRow {

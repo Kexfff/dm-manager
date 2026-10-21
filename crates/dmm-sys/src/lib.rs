@@ -14,6 +14,7 @@ pub mod ini;
 pub mod kdl_text;
 pub mod network;
 pub mod niri;
+pub mod palette;
 pub mod power;
 pub mod sysinfo;
 pub mod wallhaven;
