@@ -5,6 +5,7 @@ pub mod input;
 pub mod overview;
 pub mod power;
 pub mod shell;
+pub mod wallpapers;
 pub mod wifi;
 
 use relm4::adw;

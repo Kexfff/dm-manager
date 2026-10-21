@@ -288,7 +288,8 @@ fn disk(mount: &str) -> Option<Disk> {
     Some(Disk { total: numbers.next()?.ok()?, used: numbers.next()?.ok()? })
 }
 
-fn displays() -> Vec<Display> {
+/// Connected displays with their current mode, from niri.
+pub fn displays() -> Vec<Display> {
     let Ok(out) = Command::new("niri").args(["msg", "--json", "outputs"]).output() else { return Vec::new() };
     let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return Vec::new() };
     let mut displays: Vec<Display> = json

@@ -1,9 +1,10 @@
 //! Look and feel: the dmsh stylesheet, our icons, and the user's accent color.
 
 use std::cell::OnceCell;
-use std::path::PathBuf;
 
 use relm4::adw;
+
+use crate::settings;
 use relm4::gtk::{self, gdk};
 
 const RESOURCE_PREFIX: &str = "/io/github/kexfff/DmManager";
@@ -71,37 +72,11 @@ pub fn accent_index(accent: &Accent) -> usize {
     ACCENTS.iter().position(|a| a.id == accent.id).unwrap_or(0)
 }
 
-fn settings_path() -> PathBuf {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config"));
-    config.join("dm-manager").join("settings.kdl")
-}
-
-fn read_settings() -> kdl::KdlDocument {
-    std::fs::read_to_string(settings_path()).ok().and_then(|text| text.parse().ok()).unwrap_or_default()
-}
-
 pub fn saved_accent() -> &'static Accent {
-    let doc = read_settings();
-    let id = doc.get_arg("accent").and_then(|v| v.as_string()).unwrap_or("blue");
+    let id = settings::get("accent").unwrap_or_else(|| "blue".into());
     ACCENTS.iter().find(|a| a.id == id).unwrap_or(&ACCENTS[0])
 }
 
-/// Saves the accent, keeping whatever else is in the settings file.
 pub fn save_accent(accent: &Accent) {
-    let mut doc = read_settings();
-    doc.nodes_mut().retain(|n| n.name().value() != "accent");
-    let mut node = kdl::KdlNode::new("accent");
-    node.push(kdl::KdlEntry::new(accent.id));
-    doc.nodes_mut().push(node);
-    doc.autoformat();
-
-    let path = settings_path();
-    let written =
-        path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, doc.to_string()));
-    if let Err(e) = written {
-        log::warn!("can't save {}: {e}", path.display());
-    }
+    settings::set("accent", Some(accent.id));
 }

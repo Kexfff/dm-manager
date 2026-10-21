@@ -360,3 +360,76 @@ row:selected:hover {
   border-radius: 99px;
   min-height: 6px;
 }
+
+/* Wallpapers */
+.wall-bar {
+  margin: 6px 24px 14px;
+}
+
+.wall-grid {
+  margin: 0 24px;
+}
+
+.wall-grid > flowboxchild {
+  padding: 0;
+  border-radius: 14px;
+}
+
+.wall-card {
+  border-radius: 14px;
+  background-color: var(--card-bg-color);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 5%);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.wall-card picture {
+  opacity: 0;
+  transition: opacity 250ms ease;
+}
+
+.wall-card picture.loaded {
+  opacity: 1;
+}
+
+.wall-grid > flowboxchild:hover .wall-card {
+  transform: scale(1.02);
+  box-shadow: 0 0 0 2px var(--accent-bg-color), 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.wall-chip,
+.wall-badge {
+  margin: 8px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f5f5f7;
+  background-color: rgb(0 0 0 / 55%);
+}
+
+.wall-badge {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+}
+
+.detail-picture {
+  border-radius: 14px;
+}
+
+.wall-info-chip {
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  background-color: rgb(255 255 255 / 7%);
+}
+
+button.tag {
+  padding: 2px 10px;
+  min-height: 0;
+  border-radius: 99px;
+  font-size: 12px;
+}
+
+.any-color {
+  background-image: conic-gradient(#ff453a, #ffd60a, #30d158, #0a84ff, #bf5af2, #ff453a);
+}

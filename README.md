@@ -17,7 +17,8 @@ Built with Rust, GTK 4 and libadwaita ([relm4](https://relm4.org)).
 | **Default Apps** — browser, email, files, text, images, video, music, PDFs, archives (shown with app icons), and the terminal, including Dolphin's "Open Terminal" and, if you like, niri's terminal shortcuts | ✅ |
 | **Appearance** — for Qt/KDE apps like Dolphin: color scheme (with previews), widget style, Kvantum theme; for GTK apps: light/dark, accent, GTK 3 theme, and switching off a theming tool's `gtk.css`; for both: icon theme (with previews) and fonts | ✅ |
 | **Power & Sleep** — power mode, battery status, when the screen turns off, locks and the computer sleeps, and locking before sleep | ✅ |
-| Wallpapers — browse and download from Wallhaven | planned |
+| **Overview** — the page it opens on: the computer's name and logo, processor, memory, graphics, displays, storage, and the OS, kernel, niri and dmsh versions; copy it all for a bug report | ✅ |
+| **Wallpapers** — explore Wallhaven (search, top/hot/latest/random…, categories, minimum resolution, aspect ratio, color; an optional API key unlocks NSFW), see a wallpaper's details and tags, and set or download it in one click; or pick from the ones in `~/Pictures/Wallpapers`. Set with awww | ✅ |
 | Assistant, System Monitor | later |
 
 Pick the accent from the colored dot at the top of the sidebar. It's saved in

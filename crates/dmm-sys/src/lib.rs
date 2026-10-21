@@ -16,6 +16,8 @@ pub mod network;
 pub mod niri;
 pub mod power;
 pub mod sysinfo;
+pub mod wallhaven;
+pub mod wallpaper;
 
 pub use bus::describe_error;
 

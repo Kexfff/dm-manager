@@ -3,7 +3,7 @@
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk};
 
-use crate::pages::{self, appearance, apps, bluetooth, input, overview, power, shell, wifi};
+use crate::pages::{self, appearance, apps, bluetooth, input, overview, power, shell, wallpapers, wifi};
 use crate::theme;
 
 struct PageInfo {
@@ -38,7 +38,7 @@ const PAGES: &[PageInfo] = &[
         title: "Wallpapers",
         icon: "dmm-preferences-desktop-wallpaper-symbolic",
         section: 3,
-        soon: Some("Browse Wallhaven, download wallpapers and set them in one click."),
+        soon: None,
     },
     PageInfo {
         id: "assistant",
@@ -65,6 +65,7 @@ pub struct App {
     apps: Controller<apps::AppsPage>,
     appearance: Controller<appearance::AppearancePage>,
     power: Controller<power::PowerPage>,
+    wallpapers: Controller<wallpapers::WallpapersPage>,
     current: usize,
 }
 
@@ -128,6 +129,9 @@ impl Component for App {
         let power = power::PowerPage::builder()
             .launch(())
             .forward(sender.input_sender(), |power::Output::Toast(text)| Msg::Toast(text));
+        let wallpapers = wallpapers::WallpapersPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |wallpapers::Output::Toast(text)| Msg::Toast(text));
 
         let stack =
             gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).transition_duration(160).build();
@@ -139,6 +143,7 @@ impl Component for App {
         stack.add_named(apps.widget(), Some("apps"));
         stack.add_named(appearance.widget(), Some("appearance"));
         stack.add_named(power.widget(), Some("power"));
+        stack.add_named(wallpapers.widget(), Some("wallpapers"));
         for page in PAGES {
             if let Some(description) = page.soon {
                 stack.add_named(&pages::placeholder(page.icon, page.title, description), Some(page.id));
@@ -200,7 +205,7 @@ impl Component for App {
             screenshot_later(&root, path.into());
         }
 
-        let model = Self { overview, wifi, bluetooth, shell, input, apps, appearance, power, current: 0 };
+        let model = Self { overview, wifi, bluetooth, shell, input, apps, appearance, power, wallpapers, current: 0 };
         let widgets = Widgets { split, content_page, stack, toasts };
         ComponentParts { model, widgets }
     }
@@ -245,6 +250,7 @@ impl App {
             "apps" => self.apps.emit(apps::Input::Visible(visible)),
             "appearance" => self.appearance.emit(appearance::Input::Visible(visible)),
             "power" => self.power.emit(power::Input::Visible(visible)),
+            "wallpapers" => self.wallpapers.emit(wallpapers::Input::Visible(visible)),
             _ => {}
         }
     }
@@ -255,9 +261,10 @@ impl App {
 fn screenshot_later(window: &adw::ApplicationWindow, path: std::path::PathBuf) {
     let window = window.clone();
     let mut attempts = 0;
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(2500), move || {
-        // The window's content: a toplevel's own paintable draws nothing.
-        let content = window.content().expect("window content");
+    let delay = std::env::var("DMM_SCREENSHOT_DELAY").ok().and_then(|d| d.parse().ok()).unwrap_or(2500);
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(delay), move || {
+        // The window's top child (libadwaita's dialog host): content and any open dialog.
+        let content = gtk::prelude::GtkWindowExt::child(&window).expect("window content");
         let paintable = gtk::WidgetPaintable::new(Some(&content));
         let (width, height) = (content.width() as f32, content.height() as f32);
         let drawn = gtk::Snapshot::new();
