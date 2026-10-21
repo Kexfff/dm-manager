@@ -433,3 +433,19 @@ button.tag {
 .any-color {
   background-image: conic-gradient(#ff453a, #ffd60a, #30d158, #0a84ff, #bf5af2, #ff453a);
 }
+
+/* The Qt/KDE accent card. */
+.accent-card {
+  padding: 14px 16px;
+}
+
+.swatch.painted {
+  padding: 2px;
+  background: none;
+}
+
+.swatch.painted:checked,
+colorswatch.chosen,
+.accent-card button.color.chosen {
+  box-shadow: 0 0 0 2px var(--card-bg-color), 0 0 0 4px #f5f5f7;
+}

@@ -45,6 +45,10 @@ pub struct Current {
     pub color_scheme: Option<String>,
     pub widget_style: Option<String>,
     pub kvantum_theme: Option<String>,
+    /// The Qt/KDE accent set on top of the scheme; `None` uses the scheme's.
+    pub accent_color: Option<Rgb>,
+    /// The palette's accent now (the scheme's, or the one set on top).
+    pub palette_accent: Option<Rgb>,
     pub icon_theme: Option<String>,
     pub gtk_theme: Option<String>,
     /// gsettings `color-scheme`: `default`, `prefer-dark` or `prefer-light`.
@@ -228,6 +232,8 @@ pub fn current() -> Current {
         color_scheme: kde.get("General", "ColorScheme").map(String::from),
         widget_style: kde.get("KDE", "widgetStyle").map(String::from),
         kvantum_theme: Ini::load(&kvantum_conf()).get("General", "theme").map(String::from),
+        accent_color: kde.get("General", "AccentColor").and_then(parse_color),
+        palette_accent: kde.get("Colors:View", "DecorationFocus").and_then(parse_color),
         icon_theme: kde.get("Icons", "Theme").map(String::from).or_else(|| gsetting("icon-theme")),
         gtk_theme: gsetting("gtk-theme"),
         gtk_color_scheme: gsetting("color-scheme"),
@@ -305,21 +311,79 @@ const PALETTE_CHANGED: i32 = 0;
 const FONT_CHANGED: i32 = 1;
 const STYLE_CHANGED: i32 = 2;
 
+/// Applies a color scheme (again, if it's the current one: that restores its colors), then
+/// the accent color, if one is set.
 pub fn set_color_scheme(id: &str) -> Result<(), String> {
+    // The tool refuses to apply the current scheme; forget which one is current first.
+    kdelete("General", "ColorScheme");
+    plasma_apply(&[id])?;
+    match current_accent() {
+        Some(accent) => plasma_apply(&["--accent-color", &hex(accent)]),
+        None => Ok(()),
+    }
+}
+
+/// Tints the Qt/KDE palette (selection, focus, links) with an accent color, or with `None`
+/// goes back to the color scheme's own. Breeze icons use it for folders and highlights.
+pub fn set_accent_color(accent: Option<Rgb>) -> Result<(), String> {
+    match accent {
+        Some(color) => {
+            plasma_apply(&["--accent-color", &hex(color)])?;
+            // Remembered like Plasma does, so a new scheme keeps it.
+            kwrite("General", "AccentColor", &format!("{},{},{}", color.0, color.1, color.2))
+        }
+        None => {
+            kdelete("General", "AccentColor");
+            let scheme = Ini::load(&kdeglobals()).get("General", "ColorScheme").map(String::from);
+            set_color_scheme(scheme.as_deref().unwrap_or("BreezeDark"))
+        }
+    }
+}
+
+/// The accent color set on top of the scheme, if any.
+fn current_accent() -> Option<Rgb> {
+    Ini::load(&kdeglobals()).get("General", "AccentColor").and_then(parse_color)
+}
+
+fn plasma_apply(args: &[&str]) -> Result<(), String> {
     let out = Command::new("plasma-apply-colorscheme")
-        .arg(id)
+        .args(args)
         .output()
-        .map_err(|_| "Applying KDE color schemes needs plasma-apply-colorscheme (plasma-workspace)".to_string())?;
+        .map_err(|_| "Applying KDE colors needs plasma-apply-colorscheme (plasma-workspace)".to_string())?;
     if out.status.success() {
         return Ok(());
     }
     let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
-    // It refuses to re-apply the current scheme, which is fine.
     if text.contains("already") {
         notify_kde(PALETTE_CHANGED);
         return Ok(());
     }
     Err(text.trim().to_string())
+}
+
+fn kdelete(group: &str, key: &str) {
+    quiet(Command::new("kwriteconfig6").args(["--file", "kdeglobals", "--group", group, "--key", key, "--delete"]));
+}
+
+pub fn hex(c: Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", c.0, c.1, c.2)
+}
+
+/// The SVG of the current icon theme's folder icon, if it takes the accent color (Breeze).
+pub fn accent_folder_svg(icon_theme: &str) -> Option<String> {
+    let dir = icon_theme_dir(icon_theme)?;
+    let svg = ["places/64/folder.svg", "places/48/folder.svg", "places/32/folder.svg"]
+        .iter()
+        .find_map(|p| std::fs::read_to_string(dir.join(p)).ok())?;
+    svg.contains("ColorScheme-Accent").then_some(svg)
+}
+
+/// The folder SVG with its accent color replaced.
+pub fn tint_svg(svg: &str, color: Rgb) -> String {
+    let Some(start) = svg.find(".ColorScheme-Accent") else { return svg.to_string() };
+    let Some(open) = svg[start..].find('{').map(|i| start + i) else { return svg.to_string() };
+    let Some(close) = svg[open..].find('}').map(|i| open + i) else { return svg.to_string() };
+    format!("{}{{ color: {}; }}{}", &svg[..open], hex(color), &svg[close + 1..])
 }
 
 pub fn set_widget_style(id: &str) -> Result<(), String> {
@@ -444,6 +508,15 @@ pub fn icon_theme_dir(id: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tints_an_svg() {
+        let svg = r#"<style>.ColorScheme-Accent { color: #3daee9; } .ColorScheme-Text { color: #fcfcfc; }</style>"#;
+        assert_eq!(
+            tint_svg(svg, (233, 84, 32)),
+            r#"<style>.ColorScheme-Accent { color: #e95420; } .ColorScheme-Text { color: #fcfcfc; }</style>"#
+        );
+    }
 
     #[test]
     fn colors() {

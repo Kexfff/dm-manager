@@ -25,6 +25,20 @@ const ACCENT_COLORS: &[(&str, &str)] = &[
     ("slate", "#6f8396"),
 ];
 
+/// Plasma's accent colors.
+const KDE_ACCENTS: &[(&str, (u8, u8, u8))] = &[
+    ("Blue", (0x3d, 0xae, 0xe9)),
+    ("Teal", (0x00, 0xd3, 0xb8)),
+    ("Green", (0x3d, 0xd4, 0x25)),
+    ("Yellow", (0xe8, 0xcb, 0x2d)),
+    ("Orange", (0xe9, 0x64, 0x3a)),
+    ("Red", (0xe9, 0x3d, 0x58)),
+    ("Pink", (0xe9, 0x3a, 0x9a)),
+    ("Purple", (0xb8, 0x75, 0xdc)),
+    ("Violet", (0x92, 0x6e, 0xe4)),
+    ("Gray", (0x68, 0x6b, 0x6f)),
+];
+
 /// Icons shown on an icon theme's card.
 const SAMPLE_ICONS: &[&str] = &["folder", "text-x-generic", "image-x-generic", "utilities-terminal"];
 
@@ -44,7 +58,13 @@ pub enum Input {
     GtkTheme(String),
     GtkColorScheme(&'static str),
     Accent(&'static str),
-    Font { monospace: bool, family: String, size: f64 },
+    /// The Qt/KDE accent color; `None` for the color scheme's own.
+    KdeAccent(Option<(u8, u8, u8)>),
+    Font {
+        monospace: bool,
+        family: String,
+        size: f64,
+    },
     GtkCss(bool),
 }
 
@@ -90,6 +110,7 @@ impl Component for AppearancePage {
             .description("Dolphin, Kate, Ark and other Qt apps")
             .build();
         group.add(&scheme_carousel(&schemes, &sender, &mut bindings));
+        group.add(&kde_accent(&sender, &mut bindings));
         let list = boxed_list();
         let styles = appearance::widget_styles();
         list.append(&choice(
@@ -204,6 +225,7 @@ fn apply(input: Input) -> Result<String, String> {
     match input {
         Input::Visible(_) => Ok(String::new()),
         Input::ColorScheme(id) => appearance::set_color_scheme(&id).map(|()| String::new()),
+        Input::KdeAccent(color) => appearance::set_accent_color(color).map(|()| String::new()),
         Input::WidgetStyle(id) => {
             appearance::set_widget_style(&id)?;
             // QT_STYLE_OVERRIDE in niri's environment would keep newly started apps on the old style.
@@ -434,6 +456,112 @@ fn gtk_style_row(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindin
     });
     bindings.add(move |(c, _)| group.set_active_name(Some(c.gtk_color_scheme.as_deref().unwrap_or("default"))));
     row
+}
+
+/// A round swatch painted in `color`, with a check mark when chosen.
+fn color_swatch(color: (u8, u8, u8), tooltip: &str) -> gtk::ToggleButton {
+    let area = gtk::DrawingArea::builder().content_width(24).content_height(24).build();
+    area.set_draw_func(move |_, cr, w, h| {
+        let (w, h) = (f64::from(w), f64::from(h));
+        cr.arc(w / 2.0, h / 2.0, w.min(h) / 2.0, 0.0, std::f64::consts::TAU);
+        cr.set_source_rgb(f64::from(color.0) / 255.0, f64::from(color.1) / 255.0, f64::from(color.2) / 255.0);
+        let _ = cr.fill();
+    });
+    gtk::ToggleButton::builder().child(&area).tooltip_text(tooltip).css_classes(["swatch", "small", "painted"]).build()
+}
+
+/// The Qt/KDE accent: a preview of the icon theme's folder in it, and the choices.
+fn kde_accent(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> gtk::Box {
+    let preview = gtk::Image::builder().pixel_size(56).valign(gtk::Align::Center).build();
+    let title = gtk::Label::builder().label("Accent Color").xalign(0.0).css_classes(["heading"]).build();
+    let subtitle = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label", "caption"]).build();
+
+    let swatches = adw::WrapBox::builder().child_spacing(6).line_spacing(6).margin_top(6).build();
+    let scheme = gtk::ToggleButton::builder()
+        .label("Scheme")
+        .tooltip_text("The color scheme's own accent")
+        .css_classes(["pill", "small-pill"])
+        .build();
+    let quiet = bindings.quiet();
+    let s = sender.clone();
+    let q = quiet.clone();
+    scheme.connect_toggled(move |b| {
+        if b.is_active() && !q.get() {
+            s.input(Input::KdeAccent(None));
+        }
+    });
+    scheme.set_valign(gtk::Align::Center);
+    swatches.append(&scheme);
+    let mut presets = Vec::new();
+    for (name, color) in KDE_ACCENTS {
+        let swatch = color_swatch(*color, name);
+        swatch.set_group(Some(&scheme));
+        let (s, q, color) = (sender.clone(), quiet.clone(), *color);
+        swatch.connect_toggled(move |b| {
+            if b.is_active() && !q.get() {
+                s.input(Input::KdeAccent(Some(color)));
+            }
+        });
+        swatches.append(&swatch);
+        presets.push((color, swatch));
+    }
+    let custom = gtk::ColorDialogButton::builder()
+        .dialog(&gtk::ColorDialog::builder().title("Accent Color").with_alpha(false).build())
+        .tooltip_text("Another color")
+        .valign(gtk::Align::Center)
+        .build();
+    let (s, q) = (sender.clone(), quiet.clone());
+    custom.connect_rgba_notify(move |b| {
+        if q.get() {
+            return;
+        }
+        let c = b.rgba();
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        s.input(Input::KdeAccent(Some((byte(c.red()), byte(c.green()), byte(c.blue())))));
+    });
+    swatches.append(&custom);
+
+    let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
+    text.append(&title);
+    text.append(&subtitle);
+    text.append(&swatches);
+    let card = gtk::Box::builder().spacing(16).css_classes(["card", "accent-card"]).margin_top(12).build();
+    card.append(&preview);
+    card.append(&text);
+
+    bindings.add(move |(c, _)| {
+        let shown = c.accent_color.or(c.palette_accent).unwrap_or((0x3d, 0xae, 0xe9));
+        scheme.set_active(c.accent_color.is_none());
+        for (color, swatch) in &presets {
+            swatch.set_active(c.accent_color == Some(*color));
+        }
+        let custom_color = c.accent_color.is_some_and(|a| !presets.iter().any(|(p, _)| *p == a));
+        custom.set_rgba(&gtk::gdk::RGBA::new(
+            f32::from(shown.0) / 255.0,
+            f32::from(shown.1) / 255.0,
+            f32::from(shown.2) / 255.0,
+            1.0,
+        ));
+        if custom_color {
+            custom.add_css_class("chosen");
+        } else {
+            custom.remove_css_class("chosen");
+        }
+        // The folder icon, tinted, when the icon theme takes the accent (Breeze).
+        let svg = c.icon_theme.as_deref().and_then(appearance::accent_folder_svg);
+        let texture = svg.and_then(|svg| {
+            let tinted = appearance::tint_svg(&svg, shown);
+            gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_owned(tinted.into_bytes())).ok()
+        });
+        preview.set_visible(texture.is_some());
+        preview.set_paintable(texture.as_ref());
+        subtitle.set_label(if texture.is_some() {
+            "Folders, selections and highlights in Qt and KDE apps"
+        } else {
+            "Selections and highlights in Qt and KDE apps (Breeze icons also use it for folders)"
+        });
+    });
+    card
 }
 
 fn accent_row(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> adw::ActionRow {
