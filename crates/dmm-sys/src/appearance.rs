@@ -69,9 +69,8 @@ pub const ACCENTS: &[&str] = &["blue", "teal", "green", "yellow", "orange", "red
 fn data_dirs() -> Vec<PathBuf> {
     let home = crate::home().unwrap_or_default();
     let data_home = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".local/share"));
-    let system = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     let mut dirs = vec![data_home];
-    dirs.extend(system.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+    dirs.extend(crate::data_dirs());
     dirs
 }
 
@@ -134,14 +133,7 @@ fn parse_color(s: &str) -> Option<Rgb> {
 
 /// Qt widget styles that are installed: `(id, name)`, the id being what kdeglobals stores.
 pub fn widget_styles() -> Vec<Theme> {
-    let dirs: Vec<PathBuf> = [
-        "/usr/lib/qt6/plugins/styles",
-        "/usr/lib64/qt6/plugins/styles",
-        "/usr/lib/x86_64-linux-gnu/qt6/plugins/styles",
-    ]
-    .iter()
-    .map(PathBuf::from)
-    .collect();
+    let dirs: Vec<PathBuf> = crate::qt_plugin_dirs().into_iter().map(|d| d.join("styles")).collect();
     let has = |file: &str| dirs.iter().any(|d| d.join(file).exists());
     let mut styles = vec![];
     for (file, id, name) in [

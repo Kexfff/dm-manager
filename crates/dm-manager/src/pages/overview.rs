@@ -1,7 +1,5 @@
 //! Overview: this computer at a glance, the page the app opens on.
 
-use std::path::Path;
-
 use dmm_sys::sysinfo::{self, SystemInfo};
 use relm4::adw::prelude::*;
 use relm4::gtk::gdk;
@@ -216,9 +214,10 @@ fn set_logo(image: &gtk::Image, logo: Option<&str>) {
     if theme.is_some_and(|t| t.has_icon(logo)) {
         return image.set_icon_name(Some(logo));
     }
-    let file = ["/usr/share/icons", "/usr/share/pixmaps"]
-        .iter()
-        .flat_map(|dir| ["svg", "png"].map(|ext| Path::new(dir).join(format!("{logo}.{ext}"))))
+    let file = dmm_sys::data_dirs()
+        .into_iter()
+        .flat_map(|d| [d.join("icons"), d.join("pixmaps")])
+        .flat_map(|dir| ["svg", "png"].map(|ext| dir.join(format!("{logo}.{ext}"))))
         .find(|p| p.exists());
     match file {
         Some(path) => image.set_from_file(Some(path)),

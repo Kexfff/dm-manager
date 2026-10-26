@@ -68,7 +68,8 @@ pub fn read() -> SystemInfo {
         cores,
         threads,
         memory: installed_memory().unwrap_or_else(meminfo_total),
-        memory_type: dmi_property("MEMORY_DEVICE_0_TYPE").filter(|t| t != "Unknown" && t != "Other"),
+        memory_type: dmi_property("MEMORY_DEVICE_0_TYPE")
+            .filter(|t| !matches!(t.as_str(), "Unknown" | "Other" | "RAM")),
         gpus: gpus(),
         disk: disk("/"),
         displays: displays(),
@@ -271,7 +272,9 @@ fn gpu_from_lspci(line: &str) -> Option<String> {
     } else if vendor.contains("NVIDIA") {
         "NVIDIA"
     } else {
-        vendor.split_whitespace().next().unwrap_or(vendor)
+        // "Red Hat, Inc." → "Red Hat"
+        let name = vendor.split(',').next().unwrap_or(vendor).trim();
+        ["Corporation", "Corp.", "Inc.", "Ltd.", "Co."].iter().fold(name, |n, s| n.trim_end_matches(s).trim())
     };
     // Marketing names are in brackets: "Arrow Lake-P [Arc Pro 130T/140T]".
     let model = match (device.rfind('['), device.rfind(']')) {
@@ -322,6 +325,13 @@ fn version(program: &str) -> Option<String> {
 }
 
 fn package_count() -> Option<usize> {
+    // NixOS: the store paths of the system (what neofetch and friends count).
+    if Path::new("/run/current-system/sw").exists()
+        && let Ok(out) = Command::new("nix-store").args(["--query", "--requisites", "/run/current-system/sw"]).output()
+        && out.status.success()
+    {
+        return Some(out.stdout.iter().filter(|b| **b == b'\n').count());
+    }
     for (program, args) in [("pacman", &["-Qq"][..]), ("dpkg-query", &["-f", ".\n", "-W"][..]), ("rpm", &["-qa"][..])] {
         if let Ok(out) = Command::new(program).args(args).output()
             && out.status.success()
@@ -350,6 +360,8 @@ mod tests {
         let line = r#"01:00.0 "3D controller" "NVIDIA Corporation" "AD107M [GeForce RTX 4060 Max-Q / Mobile]" "" """#;
         assert_eq!(gpu_from_lspci(line).as_deref(), Some("NVIDIA GeForce RTX 4060 Max-Q / Mobile"));
         assert_eq!(gpu_from_lspci(r#"00:14.0 "USB controller" "Intel Corporation" "x""#), None);
+        let line = r#"00:01.0 "VGA compatible controller" "Red Hat, Inc." "Virtio 1.0 GPU" -r01 "Red Hat, Inc." "Device 1100""#;
+        assert_eq!(gpu_from_lspci(line).as_deref(), Some("Red Hat Virtio 1.0 GPU"));
     }
 
     #[test]

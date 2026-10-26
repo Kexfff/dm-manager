@@ -54,6 +54,7 @@ pub enum Output {
 pub struct Widgets {
     hero: Hero,
     include_group: adw::PreferencesGroup,
+    include: IncludeCard,
     settings: Vec<adw::PreferencesGroup>,
     layouts: KeyedList<LayoutRow>,
     bindings: Bindings<InputConfig>,
@@ -102,7 +103,7 @@ impl Component for InputPage {
         hero_group.add(&hero.root);
         root.add(&hero_group);
 
-        let include_group = include_group(&sender);
+        let (include_group, include) = include_group(&sender);
         root.add(&include_group);
 
         let mut settings = Vec::new();
@@ -228,7 +229,7 @@ impl Component for InputPage {
         settings.push(group);
 
         let mut model = Self { effective: InputConfig::default(), file: None, catalog, save: Debounce::new() };
-        let mut widgets = Widgets { hero, include_group, settings, layouts, bindings };
+        let mut widgets = Widgets { hero, include_group, include, settings, layouts, bindings };
         model.reload(&mut widgets, &sender);
         ComponentParts { model, widgets }
     }
@@ -247,21 +248,21 @@ impl Component for InputPage {
                 }
             }
             Input::AddLayout(layout, variant) => {
-                let mut layouts = self.effective.layouts();
+                let mut layouts = self.layouts();
                 if !layouts.contains(&(layout.clone(), variant.clone())) {
                     layouts.push((layout, variant));
                     self.set_layouts(w, &sender, &layouts);
                 }
             }
             Input::RemoveLayout(index) => {
-                let mut layouts = self.effective.layouts();
+                let mut layouts = self.layouts();
                 if layouts.len() > 1 && index < layouts.len() {
                     layouts.remove(index);
                     self.set_layouts(w, &sender, &layouts);
                 }
             }
             Input::MoveLayoutUp(index) => {
-                let mut layouts = self.effective.layouts();
+                let mut layouts = self.layouts();
                 if index > 0 && index < layouts.len() {
                     layouts.swap(index - 1, index);
                     self.set_layouts(w, &sender, &layouts);
@@ -297,6 +298,12 @@ impl Component for InputPage {
 }
 
 impl InputPage {
+    /// The layouts in effect: niri's, or the system's (`localectl`) when niri sets none.
+    fn layouts(&self) -> Vec<(String, String)> {
+        let layouts = self.effective.layouts();
+        if layouts.is_empty() { niri::system_layouts() } else { layouts }
+    }
+
     fn reload(&mut self, w: &mut Widgets, sender: &ComponentSender<Self>) {
         self.effective = niri::effective();
         self.file = match NiriFile::load() {
@@ -306,6 +313,7 @@ impl InputPage {
                 None
             }
         };
+        // A missing config is explained in the card; a broken one deserves a word.
         if let Some(e) = &self.effective.error {
             toast(sender, format!("Can't read niri's config: {e}"));
         }
@@ -315,6 +323,7 @@ impl InputPage {
     fn show(&self, w: &mut Widgets, sender: &ComponentSender<Self>) {
         let c = &self.effective;
         w.include_group.set_visible(!c.included);
+        w.include.show(c.missing);
         for group in &w.settings {
             group.set_sensitive(c.included && self.file.is_some());
         }
@@ -375,17 +384,46 @@ fn code(layout: &str, variant: &str) -> String {
     if variant.is_empty() { layout.to_string() } else { format!("{layout}({variant})") }
 }
 
-fn include_group(sender: &ComponentSender<InputPage>) -> adw::PreferencesGroup {
+/// The card asking to connect dm-manager's file to niri's config.
+struct IncludeCard {
+    title: gtk::Label,
+    body: gtk::Label,
+    button: gtk::Button,
+}
+
+impl IncludeCard {
+    /// `missing`: there's no niri config yet.
+    fn show(&self, missing: bool) {
+        if !missing {
+            self.title.set_label("Connect to niri");
+            self.body.set_label(
+                "DM Manager keeps its niri settings in dm-manager.kdl. niri loads that file once its \
+                 config.kdl includes it — this adds one line at the end:",
+            );
+            self.button.set_label("Add to config.kdl");
+            self.button.set_visible(true);
+        } else if niri::can_add_include() {
+            self.title.set_label("Set Up niri's Config");
+            self.body.set_label(
+                "You have no ~/.config/niri/config.kdl yet. DM Manager can create it from niri's default \
+                 config, with this line at the end so niri loads the settings made here:",
+            );
+            self.button.set_label("Create config.kdl");
+            self.button.set_visible(true);
+        } else {
+            self.title.set_label("niri's Config Isn't There Yet");
+            self.body.set_label(
+                "niri writes ~/.config/niri/config.kdl the first time it starts. Start a niri session, \
+                 then come back: DM Manager will add this line so niri loads the settings made here:",
+            );
+            self.button.set_visible(false);
+        }
+    }
+}
+
+fn include_group(sender: &ComponentSender<InputPage>) -> (adw::PreferencesGroup, IncludeCard) {
     let title = gtk::Label::builder().label("Connect to niri").xalign(0.0).css_classes(["title-4"]).build();
-    let body = gtk::Label::builder()
-        .label(
-            "DM Manager keeps its niri settings in dm-manager.kdl. niri loads that file once its config.kdl \
-             includes it — this adds one line at the end:",
-        )
-        .xalign(0.0)
-        .wrap(true)
-        .css_classes(["dim-label"])
-        .build();
+    let body = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
     let line = gtk::Label::builder()
         .label("include optional=true \"dm-manager.kdl\"")
         .xalign(0.0)
@@ -406,7 +444,7 @@ fn include_group(sender: &ComponentSender<InputPage>) -> adw::PreferencesGroup {
     }
     let group = adw::PreferencesGroup::new();
     group.add(&card);
-    group
+    (group, IncludeCard { title, body, button })
 }
 
 fn set_input(sender: &ComponentSender<InputPage>, area: Area, key: &'static str, value: Option<Value>, delayed: bool) {

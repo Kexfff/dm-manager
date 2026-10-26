@@ -35,3 +35,36 @@ pub fn config_dir() -> PathBuf {
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| home().unwrap_or_default().join(".config"))
 }
+
+/// `$XDG_DATA_DIRS`, else the usual `/usr/local/share:/usr/share` (on NixOS the variable
+/// points into the Nix profiles).
+pub fn data_dirs() -> Vec<PathBuf> {
+    std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".into())
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Directories Qt plugins may be in: `$QT_PLUGIN_PATH`, the usual system ones, and the
+/// Nix profiles.
+pub fn qt_plugin_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var("QT_PLUGIN_PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    dirs.extend(
+        ["/usr/lib/qt6/plugins", "/usr/lib64/qt6/plugins", "/usr/lib/x86_64-linux-gnu/qt6/plugins"].map(PathBuf::from),
+    );
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut profiles =
+        vec![PathBuf::from("/run/current-system/sw"), PathBuf::from(format!("/etc/profiles/per-user/{user}"))];
+    profiles.extend(home().map(|h| h.join(".nix-profile")));
+    dirs.extend(profiles.into_iter().map(|p| p.join("lib/qt-6/plugins")));
+    dirs
+}

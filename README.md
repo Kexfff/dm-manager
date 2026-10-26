@@ -65,6 +65,44 @@ Requirements: Rust, GTK 4, libadwaita 1.9 or newer, and the services the pages t
 NetworkManager for Wi-Fi and BlueZ (`bluetooth.service`) for Bluetooth. A page whose service is
 missing says so instead of failing.
 
+### NixOS (flake)
+
+Try it without installing:
+
+```bash
+nix run github:Kexfff/dm-manager
+```
+
+Or add it to your system flake and enable the module:
+
+```nix
+{
+  inputs.dm-manager.url = "github:Kexfff/dm-manager";
+  inputs.dm-manager.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { nixpkgs, dm-manager, ... }: {
+    nixosConfigurations.my-machine = nixpkgs.lib.nixosSystem {
+      modules = [
+        ./configuration.nix
+        dm-manager.nixosModules.default
+        { programs.dm-manager.enable = true; }
+      ];
+    };
+  };
+}
+```
+
+The module installs the app (with its launcher entry and icon) and turns on dconf and UPower,
+which the Appearance and Power & Sleep pages use. `programs.dm-manager.withKdeTools = false;`
+leaves out KDE's tools for theming Qt apps, if you don't use any. Without a module, the package is
+`dm-manager.packages.${system}.default` (or `pkgs.dm-manager` through `dm-manager.overlays.default`).
+
+The pages talk to services you enable as usual: `networking.networkmanager.enable` (Wi-Fi),
+`hardware.bluetooth.enable` (Bluetooth), `services.power-profiles-daemon.enable` (power mode),
+and use `programs.niri`, dmsh, swayidle and awww where present.
+
+`nix develop` gives a shell with the Rust toolchain and the GTK libraries.
+
 ## Layout
 
 ```

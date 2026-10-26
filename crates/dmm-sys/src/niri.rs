@@ -104,6 +104,8 @@ pub struct InputConfig {
     pub included: bool,
     /// The main config couldn't be read; nothing above is reliable.
     pub error: Option<String>,
+    /// There's no niri config at all (niri writes one when it first starts).
+    pub missing: bool,
 }
 
 impl InputConfig {
@@ -141,6 +143,27 @@ pub fn join_layouts(layouts: &[(String, String)]) -> (String, Option<String>) {
     (layout, any.then_some(variants))
 }
 
+/// The system's keyboard layouts (`localectl`), which niri uses when its config sets none.
+pub fn system_layouts() -> Vec<(String, String)> {
+    let Ok(out) = Command::new("localectl").arg("status").output() else { return Vec::new() };
+    parse_localectl(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_localectl(status: &str) -> Vec<(String, String)> {
+    let field = |name: &str| {
+        status.lines().find_map(|l| l.trim().strip_prefix(name).map(|v| v.trim().to_string())).unwrap_or_default()
+    };
+    let variants = field("X11 Variant:");
+    let variants: Vec<&str> = variants.split(',').collect();
+    field("X11 Layout:")
+        .split(',')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .enumerate()
+        .map(|(i, l)| (l.to_string(), variants.get(i).map_or("", |v| v.trim()).to_string()))
+        .collect()
+}
+
 /// The `grp:` option (how layouts are switched) in an xkb options string.
 pub fn switch_option(options: &str) -> Option<&str> {
     options.split(',').map(str::trim).find(|o| o.starts_with("grp:"))
@@ -159,11 +182,36 @@ pub fn niri_dir() -> PathBuf {
 }
 
 /// niri's main config: `$NIRI_CONFIG`, else `~/.config/niri/config.kdl`.
+/// niri's main config, as niri looks for it: `$NIRI_CONFIG`, `~/.config/niri/config.kdl`, then
+/// `/etc/niri/config.kdl`.
 pub fn main_config() -> PathBuf {
+    if let Some(path) = std::env::var_os("NIRI_CONFIG").map(PathBuf::from).filter(|p| !p.as_os_str().is_empty()) {
+        return path;
+    }
+    let user = user_config();
+    let system = PathBuf::from("/etc/niri/config.kdl");
+    if !user.exists() && system.exists() { system } else { user }
+}
+
+/// Where the user's own niri config goes (and where dm-manager adds its include).
+pub fn user_config() -> PathBuf {
     std::env::var_os("NIRI_CONFIG")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| niri_dir().join("config.kdl"))
+}
+
+/// A config to start the user's from, when they have none: the system's, or niri's default
+/// (some distributions ship it as documentation).
+fn config_template() -> Option<PathBuf> {
+    let mut candidates = vec![PathBuf::from("/etc/niri/config.kdl")];
+    candidates.extend(crate::data_dirs().into_iter().map(|d| d.join("doc/niri/default-config.kdl")));
+    candidates.into_iter().find(|p| p.exists())
+}
+
+/// Whether the include can be added: the user has a config, or one can be copied for them.
+pub fn can_add_include() -> bool {
+    user_config().exists() || config_template().is_some()
 }
 
 pub fn own_file() -> PathBuf {
@@ -174,7 +222,9 @@ pub fn own_file() -> PathBuf {
 pub fn effective() -> InputConfig {
     let mut config = InputConfig::default();
     let main = main_config();
-    if let Err(e) = read_into(&main, &own_file(), &mut config, 0) {
+    if !main.exists() {
+        config.missing = true;
+    } else if let Err(e) = read_into(&main, &own_file(), &mut config, 0) {
         config.error = Some(e);
     }
     config
@@ -385,7 +435,19 @@ fn validate_error(stderr: &str) -> String {
 
 /// Adds the include for dm-manager's file to the end of niri's main config.
 pub fn add_include() -> Result<(), String> {
-    let main = main_config();
+    let main = user_config();
+    if !main.exists() {
+        // Start from the system's or niri's default config: a file with only the include
+        // would replace niri's defaults (keybinds and all).
+        let template = config_template()
+            .ok_or("niri hasn't written its config yet. Start niri once (it creates ~/.config/niri/config.kdl), then try again.")?;
+        if let Some(dir) = main.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("Can't create {}: {e}", dir.display()))?;
+        }
+        // Copy the text, not the file: the template may be read-only (the Nix store).
+        let text = std::fs::read_to_string(&template).map_err(|e| format!("Can't read {}: {e}", template.display()))?;
+        std::fs::write(&main, text).map_err(|e| format!("Can't write {}: {e}", main.display()))?;
+    }
     let mut text = std::fs::read_to_string(&main).map_err(|e| format!("Can't read {}: {e}", main.display()))?;
     if !text.ends_with('\n') {
         text.push('\n');
@@ -434,9 +496,14 @@ impl XkbCatalog {
 
 /// Layouts and switching options from xkeyboard-config's rules.
 pub fn xkb_catalog() -> XkbCatalog {
-    let path = ["/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/xkeyboard-config-2/rules/evdev.xml"]
-        .into_iter()
-        .find(|p| Path::new(p).exists());
+    // $XKB_CONFIG_ROOT (set on NixOS), /etc/X11/xkb, then the data dirs.
+    let mut roots: Vec<PathBuf> = std::env::var_os("XKB_CONFIG_ROOT").map(PathBuf::from).into_iter().collect();
+    roots.push(PathBuf::from("/etc/X11/xkb"));
+    for dir in crate::data_dirs() {
+        roots.push(dir.join("X11/xkb"));
+        roots.push(dir.join("xkeyboard-config-2"));
+    }
+    let path = roots.into_iter().map(|r| r.join("rules/evdev.xml")).find(|p| p.exists());
     let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) else {
         return XkbCatalog::default();
     };
@@ -521,9 +588,8 @@ pub struct CursorTheme {
 /// Installed cursor themes (icon themes with a `cursors` directory).
 pub fn cursor_themes() -> Vec<CursorTheme> {
     let home = crate::home().unwrap_or_default();
-    let data_dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     let mut roots = vec![home.join(".local/share/icons"), home.join(".icons")];
-    roots.extend(data_dirs.split(':').filter(|d| !d.is_empty()).map(|d| PathBuf::from(d).join("icons")));
+    roots.extend(crate::data_dirs().into_iter().map(|d| d.join("icons")));
     roots.push(PathBuf::from("/usr/share/pixmaps"));
 
     let mut themes: Vec<CursorTheme> = Vec::new();
@@ -797,6 +863,13 @@ cursor {
             Some("caps:escape,grp:win_space_toggle".into())
         );
         assert_eq!(with_switch_option("grp:alt_shift_toggle", None), None);
+    }
+
+    #[test]
+    fn localectl_layouts() {
+        let status = "   X11 Layout: us,ru\n    X11 Model: pc105\n  X11 Variant: ,phonetic\n";
+        assert_eq!(parse_localectl(status), vec![("us".into(), "".into()), ("ru".into(), "phonetic".into())]);
+        assert!(parse_localectl("    VC Keymap: us\n").is_empty());
     }
 
     #[test]

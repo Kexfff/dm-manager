@@ -512,17 +512,36 @@ fn rounded(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     cr.close_path();
 }
 
+thread_local! {
+    /// Icon themes made for previews. GTK loads their icons on worker threads, so a theme
+    /// must outlive its icons; they're kept for the app's lifetime (one per installed theme).
+    static PREVIEW_THEMES: RefCell<std::collections::HashMap<String, gtk::IconTheme>> = RefCell::default();
+}
+
+/// An icon theme other than the current one, to preview its icons.
+fn preview_theme(id: &str, display: &gtk::gdk::Display) -> gtk::IconTheme {
+    PREVIEW_THEMES.with(|themes| {
+        themes
+            .borrow_mut()
+            .entry(id.to_string())
+            .or_insert_with(|| {
+                let theme = gtk::IconTheme::new();
+                theme.set_theme_name(Some(id));
+                // Search the same places as the display's theme (user and system icon dirs).
+                let paths = gtk::IconTheme::for_display(display).search_path();
+                theme.set_search_path(&paths.iter().map(|p| p.as_path()).collect::<Vec<_>>());
+                theme
+            })
+            .clone()
+    })
+}
+
 fn icon_carousel(sender: &ComponentSender<AppearancePage>, bindings: &mut Bindings<Shown>) -> gtk::ScrolledWindow {
     let display = gtk::gdk::Display::default().expect("a display");
     let cards = appearance::icon_themes()
         .into_iter()
         .map(|theme| {
-            let lookup = gtk::IconTheme::new();
-            lookup.set_theme_name(Some(&theme.id));
-            // Search the same places as the display's theme (user and system icon dirs).
-            lookup.set_search_path(
-                &gtk::IconTheme::for_display(&display).search_path().iter().map(|p| p.as_path()).collect::<Vec<_>>(),
-            );
+            let lookup = preview_theme(&theme.id, &display);
             let row = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).css_classes(["icon-preview"]).build();
             for name in SAMPLE_ICONS {
                 let paintable =
