@@ -470,3 +470,8 @@ colorswatch.chosen,
 row.dim-row .title {
   opacity: 0.85;
 }
+
+/* Displays: the arrangement canvas. */
+.canvas-card {
+  padding: 6px;
+}

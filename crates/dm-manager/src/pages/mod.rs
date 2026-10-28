@@ -1,6 +1,7 @@
 pub mod appearance;
 pub mod apps;
 pub mod binds;
+pub mod displays;
 pub mod bluetooth;
 pub mod input;
 pub mod overview;

@@ -3,7 +3,7 @@
 use relm4::adw::prelude::*;
 use relm4::{Component, ComponentController, ComponentParts, ComponentSender, Controller, adw, gtk};
 
-use crate::pages::{self, appearance, apps, binds, bluetooth, input, overview, power, shell, wallpapers, wifi};
+use crate::pages::{self, appearance, apps, binds, bluetooth, displays, input, overview, power, shell, wallpapers, wifi};
 use crate::theme;
 
 struct PageInfo {
@@ -28,6 +28,13 @@ const PAGES: &[PageInfo] = &[
         id: "binds",
         title: "Keyboard Shortcuts",
         icon: "dmm-preferences-desktop-keyboard-shortcuts-symbolic",
+        section: 2,
+        soon: None,
+    },
+    PageInfo {
+        id: "displays",
+        title: "Displays",
+        icon: "dmm-preferences-desktop-display-symbolic",
         section: 2,
         soon: None,
     },
@@ -70,6 +77,7 @@ pub struct App {
     shell: Controller<shell::ShellPage>,
     input: Controller<input::InputPage>,
     binds: Controller<binds::BindsPage>,
+    displays: Controller<displays::DisplaysPage>,
     apps: Controller<apps::AppsPage>,
     appearance: Controller<appearance::AppearancePage>,
     power: Controller<power::PowerPage>,
@@ -131,6 +139,9 @@ impl Component for App {
         let binds = binds::BindsPage::builder()
             .launch(())
             .forward(sender.input_sender(), |binds::Output::Toast(text)| Msg::Toast(text));
+        let displays = displays::DisplaysPage::builder()
+            .launch(())
+            .forward(sender.input_sender(), |displays::Output::Toast(text)| Msg::Toast(text));
         let apps = apps::AppsPage::builder()
             .launch(())
             .forward(sender.input_sender(), |apps::Output::Toast(text)| Msg::Toast(text));
@@ -152,6 +163,7 @@ impl Component for App {
         stack.add_named(shell.widget(), Some("shell"));
         stack.add_named(input.widget(), Some("input"));
         stack.add_named(binds.widget(), Some("binds"));
+        stack.add_named(displays.widget(), Some("displays"));
         stack.add_named(apps.widget(), Some("apps"));
         stack.add_named(appearance.widget(), Some("appearance"));
         stack.add_named(power.widget(), Some("power"));
@@ -218,7 +230,7 @@ impl Component for App {
         }
 
         let model =
-            Self { overview, wifi, bluetooth, shell, input, binds, apps, appearance, power, wallpapers, current: 0 };
+            Self { overview, wifi, bluetooth, shell, input, binds, displays, apps, appearance, power, wallpapers, current: 0 };
         let widgets = Widgets { split, content_page, stack, toasts };
         ComponentParts { model, widgets }
     }
@@ -261,6 +273,7 @@ impl App {
             "shell" => self.shell.emit(shell::Input::Visible(visible)),
             "input" => self.input.emit(input::Input::Visible(visible)),
             "binds" => self.binds.emit(binds::Input::Visible(visible)),
+            "displays" => self.displays.emit(displays::Input::Visible(visible)),
             "apps" => self.apps.emit(apps::Input::Visible(visible)),
             "appearance" => self.appearance.emit(appearance::Input::Visible(visible)),
             "power" => self.power.emit(power::Input::Visible(visible)),
