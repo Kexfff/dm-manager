@@ -1,4 +1,5 @@
 mod app;
+mod keys;
 mod pages;
 mod settings;
 mod theme;

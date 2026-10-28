@@ -468,13 +468,25 @@ pub fn describe(action_text: &str) -> String {
     }
     match action.arg {
         Arg::Command => {
-            let program = split_command(&p.arg).and_then(|w| w.into_iter().next()).unwrap_or_default();
-            format!("Run {}", program.rsplit('/').next().unwrap_or(&program))
+            // The program by its name, with its arguments: "Run playerctl play-pause".
+            let words = split_command(&p.arg).unwrap_or_default();
+            let mut words = words.into_iter();
+            let program = words.next().unwrap_or_default();
+            let program = program.rsplit('/').next().unwrap_or(&program).to_string();
+            let line = std::iter::once(program).chain(words).collect::<Vec<_>>().join(" ");
+            format!("Run {}", shorten(&line, 48))
         }
-        Arg::Shell => format!("Run: {}", p.arg),
+        Arg::Shell => format!("Run: {}", shorten(&p.arg, 48)),
         Arg::Workspace => format!("{} {}", action.label, p.arg),
         _ => format!("{}: {}", action.label, p.arg),
     }
+}
+
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    text.chars().take(max - 1).collect::<String>() + "…"
 }
 
 /// A bind as dm-manager writes it.
@@ -559,6 +571,7 @@ mod tests {
     #[test]
     fn descriptions() {
         assert_eq!(describe(r#"spawn "/usr/bin/kitty""#), "Run kitty");
+        assert_eq!(describe(r#"spawn "playerctl" "play-pause""#), "Run playerctl play-pause");
         assert_eq!(describe("focus-workspace 3"), "Focus workspace 3");
         assert_eq!(describe("close-window"), "Close window");
     }
