@@ -475,3 +475,14 @@ row.dim-row .title {
 .canvas-card {
   padding: 6px;
 }
+
+.display-tile {
+  border-radius: 10px;
+  background-color: alpha(currentColor, 0.07);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.16);
+}
+
+.display-tile.selected {
+  background-color: color-mix(in srgb, var(--accent-bg-color) 28%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent-bg-color);
+}

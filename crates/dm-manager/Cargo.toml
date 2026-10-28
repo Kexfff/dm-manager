@@ -8,7 +8,6 @@ license.workspace = true
 dmm-sys = { path = "../dmm-sys" }
 env_logger = "0.11"
 gio-unix = "0.22"
-pangocairo = "0.22"
 kdl = { version = "6.7", default-features = false, features = ["v1-fallback"] }
 log = "0.4"
 relm4 = { version = "0.11", features = ["libadwaita", "gnome_50"] }

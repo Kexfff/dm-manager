@@ -13,10 +13,9 @@ use std::time::Duration;
 use dmm_sys::niri::{self, InputConfig, NiriFile};
 use dmm_sys::outputs::{self, Mode, Output as Display, Settings, Transform};
 use relm4::adw::prelude::*;
-use relm4::gtk::{gdk, glib, pango};
+use relm4::gtk::{glib, pango};
 use relm4::{Component, ComponentParts, ComponentSender, adw, gtk};
 
-use crate::theme;
 use crate::widgets::{Bindings, Hero, combo_row, switch_row};
 
 const KEEP_SECONDS: u32 = 15;
@@ -550,33 +549,35 @@ fn build_controls(list: &gtk::ListBox, sender: &ComponentSender<DisplaysPage>, b
     });
 }
 
-/// The arrangement: monitors drawn to scale, which can be dragged (edges snap to each other).
+/// The arrangement: monitors as tiles drawn to scale, which can be dragged (edges snap to each
+/// other). Tiles are widgets placed by a custom layout, so their text is ordinary labels.
 struct Canvas {
     frame: gtk::Box,
-    area: gtk::DrawingArea,
+    area: gtk::Box,
     state: Rc<RefCell<CanvasState>>,
 }
 
 #[derive(Default)]
 struct CanvasState {
-    /// Each output and its settings (on ones only).
+    /// Each output and its settings (on ones only), and its tile.
     items: Vec<(Display, Settings)>,
-    selected: String,
+    tiles: Vec<gtk::Box>,
     /// While dragging: the item and where it started (logical).
     drag: Option<(usize, f64, f64)>,
-    /// Logical → widget: scale and offset, from the last draw.
+    /// Logical → widget: scale and offset, from the last layout.
     view: (f64, f64, f64),
 }
 
 impl Canvas {
     fn new(sender: &ComponentSender<DisplaysPage>) -> Self {
-        let area = gtk::DrawingArea::builder().content_height(260).hexpand(true).css_classes(["display-canvas"]).build();
         let state: Rc<RefCell<CanvasState>> = Rc::default();
         let st = state.clone();
-        area.set_draw_func(move |area, cr, width, height| draw(area, cr, width, height, &mut st.borrow_mut()));
+        let layout = CanvasLayout::new(move |width, height| place(&mut st.borrow_mut(), width, height));
+        let area = gtk::Box::builder().hexpand(true).overflow(gtk::Overflow::Hidden).build();
+        area.set_layout_manager(Some(layout));
 
         let drag = gtk::GestureDrag::new();
-        let (st, s, a) = (state.clone(), sender.clone(), area.clone());
+        let (st, s) = (state.clone(), sender.clone());
         drag.connect_drag_begin(move |_, x, y| {
             let mut state = st.borrow_mut();
             let (k, ox, oy) = state.view;
@@ -589,9 +590,10 @@ impl Canvas {
                 let (o, set) = &state.items[i];
                 let (name, x0, y0) = (o.name.clone(), f64::from(set.x), f64::from(set.y));
                 state.drag = Some((i, x0, y0));
-                state.selected = name.clone();
+                for (j, tile) in state.tiles.iter().enumerate() {
+                    set_class(tile, "selected", j == i);
+                }
                 s.input(Input::Select(name));
-                a.queue_draw();
             }
         });
         let (st, a) = (state.clone(), area.clone());
@@ -602,9 +604,9 @@ impl Canvas {
             let (x, y) = snap(&state.items, i, x0 + dx / k, y0 + dy / k, 14.0 / k);
             state.items[i].1.x = x;
             state.items[i].1.y = y;
-            a.queue_draw();
+            a.queue_allocate();
         });
-        let (st, s) = (state.clone(), sender.clone());
+        let (st, s, a) = (state.clone(), sender.clone(), area.clone());
         drag.connect_drag_end(move |_, _, _| {
             let mut state = st.borrow_mut();
             let Some((i, x0, y0)) = state.drag.take() else { return };
@@ -612,6 +614,8 @@ impl Canvas {
             if (f64::from(settings.x), f64::from(settings.y)) != (x0, y0) {
                 s.input(Input::Change(o.name.clone(), settings.clone()));
             }
+            // Fit the new arrangement.
+            a.queue_allocate();
         });
         area.add_controller(drag);
 
@@ -625,10 +629,80 @@ impl Canvas {
         if state.drag.is_some() {
             return;
         }
+        for tile in state.tiles.drain(..) {
+            self.area.remove(&tile);
+        }
+        for (output, settings) in &items {
+            let tile = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .valign(gtk::Align::Fill)
+                .css_classes(["display-tile"])
+                .overflow(gtk::Overflow::Hidden)
+                .build();
+            set_class(&tile, "selected", output.name == selected);
+            let name = gtk::Label::builder()
+                .label(&output.name)
+                .css_classes(["heading"])
+                .ellipsize(pango::EllipsizeMode::End)
+                .vexpand(true)
+                .valign(gtk::Align::End)
+                .build();
+            let mode = gtk::Label::builder()
+                .label(settings.mode.map(|m| format!("{} × {}", m.width, m.height)).unwrap_or_default())
+                .css_classes(["caption", "dim-label"])
+                .ellipsize(pango::EllipsizeMode::End)
+                .vexpand(true)
+                .valign(gtk::Align::Start)
+                .build();
+            tile.append(&name);
+            tile.append(&mode);
+            self.area.append(&tile);
+            state.tiles.push(tile);
+        }
         state.items = items;
-        state.selected = selected.to_string();
         drop(state);
-        self.area.queue_draw();
+        self.area.queue_allocate();
+    }
+}
+
+fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        widget.add_css_class(class);
+    } else {
+        widget.remove_css_class(class);
+    }
+}
+
+/// Fits the arrangement into the canvas (keeping the view while dragging, so it doesn't jump)
+/// and gives each tile its rectangle.
+fn place(state: &mut CanvasState, w: f64, h: f64) {
+    if state.items.is_empty() {
+        return;
+    }
+    if state.drag.is_none() || state.view.0 == 0.0 {
+        let bounds = state.items.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |b, (_, s)| {
+            let (sw, sh) = s.logical_size();
+            let (x, y) = (f64::from(s.x), f64::from(s.y));
+            (b.0.min(x), b.1.min(y), b.2.max(x + sw), b.3.max(y + sh))
+        });
+        let pad = 28.0;
+        let (bw, bh) = ((bounds.2 - bounds.0).max(1.0), (bounds.3 - bounds.1).max(1.0));
+        let k = ((w - 2.0 * pad) / bw).min((h - 2.0 * pad) / bh).clamp(0.001, 0.25);
+        state.view = (k, (w - bw * k) / 2.0 - bounds.0 * k, (h - bh * k) / 2.0 - bounds.1 * k);
+    }
+    let (k, ox, oy) = state.view;
+    for ((_, s), tile) in state.items.iter().zip(&state.tiles) {
+        let (sw, sh) = s.logical_size();
+        // GTK wants children measured before they're allocated; tiles never go below that.
+        let (min_w, ..) = tile.measure(gtk::Orientation::Horizontal, -1);
+        let (min_h, ..) = tile.measure(gtk::Orientation::Vertical, -1);
+        let rect = gtk::Allocation::new(
+            (ox + f64::from(s.x) * k + 2.0).round() as i32,
+            (oy + f64::from(s.y) * k + 2.0).round() as i32,
+            ((sw * k - 4.0).round() as i32).max(min_w),
+            ((sh * k - 4.0).round() as i32).max(min_h),
+        );
+        tile.size_allocate(&rect, -1);
     }
 }
 
@@ -656,75 +730,56 @@ fn snap(items: &[(Display, Settings)], i: usize, x: f64, y: f64, reach: f64) -> 
     (best_x.0.round() as i32, best_y.0.round() as i32)
 }
 
-fn draw(area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32, state: &mut CanvasState) {
-    let (w, h) = (f64::from(width), f64::from(height));
-    if state.items.is_empty() {
-        return;
-    }
-    // Fit the layout (as it was when the drag started, so the view doesn't jump).
-    let bounds = state.items.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |b, (_, s)| {
-        let (sw, sh) = s.logical_size();
-        let (x, y) = (f64::from(s.x), f64::from(s.y));
-        (b.0.min(x), b.1.min(y), b.2.max(x + sw), b.3.max(y + sh))
-    });
-    if state.drag.is_none() || state.view.0 == 0.0 {
-        let pad = 28.0;
-        let (bw, bh) = ((bounds.2 - bounds.0).max(1.0), (bounds.3 - bounds.1).max(1.0));
-        let k = ((w - 2.0 * pad) / bw).min((h - 2.0 * pad) / bh).min(0.25);
-        let ox = (w - bw * k) / 2.0 - bounds.0 * k;
-        let oy = (h - bh * k) / 2.0 - bounds.1 * k;
-        state.view = (k, ox, oy);
-    }
-    let (k, ox, oy) = state.view;
-    let accent = gdk::RGBA::parse(theme::saved_accent().color).unwrap_or(gdk::RGBA::BLUE);
-    let fg = area.color();
+glib::wrapper! {
+    /// Lays out the canvas's tiles with a closure: 260 px tall, as wide as given.
+    pub struct CanvasLayout(ObjectSubclass<imp::CanvasLayout>) @extends gtk::LayoutManager;
+}
 
-    for (output, s) in &state.items {
-        let (sw, sh) = s.logical_size();
-        let (x, y) = (ox + f64::from(s.x) * k + 2.0, oy + f64::from(s.y) * k + 2.0);
-        let (rw, rh) = (sw * k - 4.0, sh * k - 4.0);
-        let selected = output.name == state.selected;
-        rounded(cr, x, y, rw, rh, 10.0);
-        if selected {
-            cr.set_source_rgba(f64::from(accent.red()), f64::from(accent.green()), f64::from(accent.blue()), 0.28);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.07);
-        }
-        let _ = cr.fill_preserve();
-        if selected {
-            cr.set_source_rgba(f64::from(accent.red()), f64::from(accent.green()), f64::from(accent.blue()), 1.0);
-            cr.set_line_width(2.0);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.16);
-            cr.set_line_width(1.0);
-        }
-        let _ = cr.stroke();
-
-        // The name and resolution, centered.
-        let mode = s.mode.map(|m| format!("{} × {}", m.width, m.height)).unwrap_or_default();
-        let layout = area.create_pango_layout(None);
-        layout.set_markup(&format!(
-            "<b>{}</b>\n<span size='small' alpha='65%'>{}</span>",
-            glib::markup_escape_text(&output.name),
-            mode
-        ));
-        layout.set_alignment(pango::Alignment::Center);
-        let (tw, th) = layout.pixel_size();
-        if f64::from(tw) < rw - 8.0 && f64::from(th) < rh - 4.0 {
-            cr.set_source_rgba(f64::from(fg.red()), f64::from(fg.green()), f64::from(fg.blue()), 1.0);
-            cr.move_to(x + (rw - f64::from(tw)) / 2.0, y + (rh - f64::from(th)) / 2.0);
-            pangocairo::functions::show_layout(cr, &layout);
-        }
+impl CanvasLayout {
+    fn new(allocate: impl Fn(f64, f64) + 'static) -> Self {
+        let layout: Self = glib::Object::new();
+        gtk::subclass::prelude::ObjectSubclassIsExt::imp(&layout).allocate.replace(Some(Box::new(allocate)));
+        layout
     }
 }
 
-fn rounded(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
-    use std::f64::consts::PI;
-    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
-    cr.new_sub_path();
-    cr.arc(x + w - r, y + r, r, -PI / 2.0, 0.0);
-    cr.arc(x + w - r, y + h - r, r, 0.0, PI / 2.0);
-    cr.arc(x + r, y + h - r, r, PI / 2.0, PI);
-    cr.arc(x + r, y + r, r, PI, 3.0 * PI / 2.0);
-    cr.close_path();
+mod imp {
+    use std::cell::RefCell;
+
+    use relm4::gtk::{self, glib, subclass::prelude::*};
+
+    type Allocate = Box<dyn Fn(f64, f64)>;
+
+    #[derive(Default)]
+    pub struct CanvasLayout {
+        pub allocate: RefCell<Option<Allocate>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for CanvasLayout {
+        const NAME: &'static str = "DmmCanvasLayout";
+        type Type = super::CanvasLayout;
+        type ParentType = gtk::LayoutManager;
+    }
+
+    impl ObjectImpl for CanvasLayout {}
+
+    impl LayoutManagerImpl for CanvasLayout {
+        fn request_mode(&self, _: &gtk::Widget) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::ConstantSize
+        }
+
+        fn measure(&self, _: &gtk::Widget, orientation: gtk::Orientation, _: i32) -> (i32, i32, i32, i32) {
+            match orientation {
+                gtk::Orientation::Vertical => (260, 260, -1, -1),
+                _ => (0, 0, -1, -1),
+            }
+        }
+
+        fn allocate(&self, _: &gtk::Widget, width: i32, height: i32, _: i32) {
+            if let Some(allocate) = &*self.allocate.borrow() {
+                allocate(f64::from(width), f64::from(height));
+            }
+        }
+    }
 }
