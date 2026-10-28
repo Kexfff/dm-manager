@@ -202,7 +202,33 @@ impl KdlText {
         let Some(node) = self.node(path) else {
             return Ok(());
         };
-        let (mut start, mut end) = span(node.span());
+        let at = span(node.span());
+        self.remove_at(at)
+    }
+
+    /// The top-level node `name` whose first argument is `arg` (like `output "eDP-1"`).
+    pub fn node_with_arg(&self, name: &str, arg: &str) -> Option<&KdlNode> {
+        self.doc.nodes().iter().find(|n| {
+            n.name().value() == name
+                && n.entries().iter().find(|e| e.name().is_none()).and_then(|e| e.value().as_string()) == Some(arg)
+        })
+    }
+
+    /// Removes the top-level `name "arg" { … }` node, if there is one.
+    pub fn remove_with_arg(&mut self, name: &str, arg: &str) -> Result<(), String> {
+        let Some(node) = self.node_with_arg(name, arg) else { return Ok(()) };
+        let at = span(node.span());
+        self.remove_at(at)
+    }
+
+    /// The text of a node, as written.
+    pub fn node_text(&self, node: &KdlNode) -> &str {
+        let (start, end) = span(node.span());
+        &self.text[start..end]
+    }
+
+    /// Removes the text at a node's span, with its line when the node is alone on it.
+    fn remove_at(&mut self, (mut start, mut end): (usize, usize)) -> Result<(), String> {
         let bytes = self.text.as_bytes();
         let line_start = self.text[..start].rfind('\n').map_or(0, |i| i + 1);
         let rest = &self.text[end..];

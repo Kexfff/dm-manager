@@ -81,11 +81,39 @@ impl Section {
 /// A key bind as written in its file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bind {
+    /// The key combination, as niri writes it (`Mod+Shift+T`).
+    pub key: String,
+    /// The action as written (`spawn "kitty"`, `focus-workspace 3`).
+    pub action: String,
     /// The program it starts, for `spawn` binds.
     pub spawn: Option<String>,
+    /// `hotkey-overlay-title`.
+    pub title: Option<String>,
+    /// `hotkey-overlay-title=null`: hidden from the hotkey overlay.
+    pub hidden: bool,
+    pub repeat: bool,
+    pub allow_when_locked: bool,
+    pub cooldown_ms: Option<u32>,
+    pub allow_inhibiting: bool,
+    /// The file it's in.
+    pub source: PathBuf,
+    /// It's in dm-manager's own file (so dm-manager may change it).
+    pub own: bool,
+    /// The bind it replaces from an earlier file: `(file, action)`.
+    pub overrides: Option<(PathBuf, String)>,
     raw: String,
     /// Where the action node is in `raw`.
-    action: (usize, usize),
+    action_span: (usize, usize),
+}
+
+/// An `output "…" { … }` block in effect (niri uses the first one for each output).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputBlock {
+    /// The name it matches: a connector (`eDP-1`) or "Make Model Serial".
+    pub name: String,
+    pub source: PathBuf,
+    pub own: bool,
+    raw: String,
 }
 
 /// The input and cursor settings in effect, read from the whole niri config.
@@ -100,6 +128,8 @@ pub struct InputConfig {
     pub environment: Section,
     /// Key binds in effect, by key (`Mod+T`).
     pub binds: BTreeMap<String, Bind>,
+    /// Output blocks in effect, in order (the first for a name applies).
+    pub outputs: Vec<OutputBlock>,
     /// The main config includes dm-manager's file.
     pub included: bool,
     /// The main config couldn't be read; nothing above is reliable.
@@ -276,22 +306,56 @@ fn read_into(path: &Path, own: &Path, config: &mut InputConfig, depth: usize) ->
             "cursor" => merge(&mut config.cursor, node),
             "environment" => merge(&mut config.environment, node),
             "binds" => {
+                let own = same_file(path, own);
                 for bind in node.children().map(|c| c.nodes()).unwrap_or_default() {
                     let Some(action) = bind.children().and_then(|c| c.nodes().first()) else { continue };
                     let (start, end) = (bind.span().offset(), bind.span().offset() + bind.span().len());
                     let (a_start, a_end) = (action.span().offset(), action.span().offset() + action.span().len());
+                    let key = bind.name().value().to_string();
+                    let prop = |name: &str| bind.entry(name).map(|e| e.value());
+                    let flag = |name: &str, default: bool| prop(name).and_then(|v| v.as_bool()).unwrap_or(default);
                     let spawn = (action.name().value() == "spawn")
                         .then(|| action.entries().first().and_then(|e| e.value().as_string().map(String::from)))
                         .flatten();
-                    config.binds.insert(
-                        bind.name().value().to_string(),
-                        Bind {
-                            spawn,
-                            raw: file.text()[start..end].to_string(),
-                            action: (a_start - start, a_end - start),
-                        },
-                    );
+                    let overrides = config.binds.get(&key).map(|prev| {
+                        prev.overrides.clone().unwrap_or_else(|| (prev.source.clone(), prev.action.clone()))
+                    });
+                    let new = Bind {
+                        action: file.text()[a_start..a_end].trim_end_matches(';').trim().to_string(),
+                        spawn,
+                        title: prop("hotkey-overlay-title").and_then(|v| v.as_string()).map(String::from),
+                        hidden: prop("hotkey-overlay-title").is_some_and(|v| v.is_null()),
+                        repeat: flag("repeat", true),
+                        allow_when_locked: flag("allow-when-locked", false),
+                        cooldown_ms: prop("cooldown-ms")
+                            .and_then(|v| v.as_integer())
+                            .and_then(|n| u32::try_from(n).ok()),
+                        allow_inhibiting: flag("allow-inhibiting", true),
+                        source: path.to_path_buf(),
+                        own,
+                        overrides: overrides.filter(|(source, _)| !same_file(source, path)),
+                        raw: file.text()[start..end].to_string(),
+                        action_span: (a_start - start, a_end - start),
+                        key: key.clone(),
+                    };
+                    config.binds.insert(key, new);
                 }
+            }
+            "output" => {
+                let Some(name) = node.entries().iter().find(|e| e.name().is_none()).and_then(|e| e.value().as_string())
+                else {
+                    continue;
+                };
+                // niri applies the first block for an output; later ones are ignored.
+                if config.outputs.iter().any(|o| o.name.eq_ignore_ascii_case(name)) {
+                    continue;
+                }
+                config.outputs.push(OutputBlock {
+                    name: name.to_string(),
+                    source: path.to_path_buf(),
+                    own: same_file(path, own),
+                    raw: file.node_text(node).to_string(),
+                });
             }
             _ => {}
         }
@@ -400,9 +464,43 @@ impl NiriFile {
     /// Makes the bind for `key` start `program` instead, keeping its key and options.
     pub fn rebind_spawn(&mut self, key: &str, bind: &Bind, program: &str) -> Result<(), String> {
         let action = format!("spawn {}", Value::Str(program.into()).repr(crate::kdl_text::Version::V1));
-        let raw = format!("{}{action}{}", &bind.raw[..bind.action.0], &bind.raw[bind.action.1..]);
+        let raw = format!("{}{action}{}", &bind.raw[..bind.action_span.0], &bind.raw[bind.action_span.1..]);
         self.file.remove(&["binds", key])?;
         self.file.insert_node_text(&["binds"], &raw)
+    }
+
+    /// Adds or replaces a bind (in this file only). `old_key` is the key it had, when an edit
+    /// changes it.
+    pub fn set_bind(&mut self, old_key: Option<&str>, spec: &crate::binds::BindSpec) -> Result<(), String> {
+        if let Some(old) = old_key {
+            self.remove_bind(old)?;
+        }
+        self.remove_bind(&spec.key)?;
+        self.file.insert_node_text(&["binds"], &spec.render())
+    }
+
+    /// Removes a bind from this file (binds from other files aren't touched).
+    pub fn remove_bind(&mut self, key: &str) -> Result<(), String> {
+        self.file.remove(&["binds", key])
+    }
+
+    /// Writes an output's settings, replacing this file's block for it; children dm-manager
+    /// doesn't manage (e.g. `focus-at-startup`) are kept.
+    pub fn set_output(&mut self, name: &str, settings: &crate::outputs::Settings) -> Result<(), String> {
+        let extra: Vec<String> = self
+            .file
+            .node_with_arg("output", name)
+            .and_then(|n| n.children())
+            .map(|c| {
+                c.nodes()
+                    .iter()
+                    .filter(|n| !crate::outputs::MANAGED.contains(&n.name().value()))
+                    .map(|n| self.file.node_text(n).to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.file.remove_with_arg("output", name)?;
+        self.file.insert_node_text(&[], &crate::outputs::render_block(name, settings, &extra))
     }
 
     /// Checks the file with `niri validate`, then replaces it (niri reloads it on its own).
@@ -431,6 +529,66 @@ fn validate_error(stderr: &str) -> String {
         .rfind(|l| !l.is_empty() && !l.contains("error loading config") && !l.contains("error parsing"))
         .unwrap_or("niri rejected the settings")
         .to_string()
+}
+
+const MOVED: &str = "// Moved to dm-manager.kdl by DM Manager, which manages this output now:";
+
+/// Moves an output's block from the user's file where niri reads it into dm-manager's file
+/// (once, on request): the original is commented out with a note, its settings copied over.
+/// Checked with `niri validate` on the whole config; on failure both files are put back.
+pub fn manage_output(config: &InputConfig, name: &str) -> Result<(), String> {
+    let block = config
+        .outputs
+        .iter()
+        .find(|o| o.name.eq_ignore_ascii_case(name) && !o.own)
+        .ok_or_else(|| format!("{name} isn't configured in another file"))?;
+    let source_text =
+        std::fs::read_to_string(&block.source).map_err(|e| format!("Can't read {}: {e}", block.source.display()))?;
+    let commented = comment_out(&source_text, &block.raw)
+        .ok_or_else(|| format!("Can't find {name}'s block in {}", block.source.display()))?;
+
+    let mut own = NiriFile::load()?;
+    own.file.remove_with_arg("output", &block.name)?;
+    own.file.insert_node_text(&[], &block.raw)?;
+
+    let own_before = std::fs::read_to_string(&own.path).ok();
+    std::fs::write(&block.source, &commented).map_err(|e| format!("Can't write {}: {e}", block.source.display()))?;
+    let checked = own.save().and_then(|()| validate(&main_config()));
+    if let Err(e) = checked {
+        let _ = std::fs::write(&block.source, &source_text);
+        match own_before {
+            Some(text) => {
+                let _ = std::fs::write(&own.path, text);
+            }
+            None => {
+                let _ = std::fs::remove_file(&own.path);
+            }
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// The text with the lines of `block` commented out, under a note.
+fn comment_out(text: &str, block: &str) -> Option<String> {
+    let start = text.find(block)?;
+    let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+    let end = start + block.len();
+    let line_end = text[end..].find('\n').map_or(text.len(), |i| end + i);
+    let indent: String = text[line_start..start].chars().take_while(|c| c.is_whitespace()).collect();
+    let commented: Vec<String> = text[line_start..line_end]
+        .lines()
+        .map(|l| format!("{indent}// {}", l.strip_prefix(&indent).unwrap_or(l)))
+        .collect();
+    Some(format!("{}{indent}{MOVED}\n{}{}", &text[..line_start], commented.join("\n"), &text[line_end..]))
+}
+
+/// `niri validate` on a config file.
+fn validate(path: &Path) -> Result<(), String> {
+    match Command::new("niri").arg("validate").arg("-c").arg(path).output() {
+        Ok(out) if !out.status.success() => Err(validate_error(&String::from_utf8_lossy(&out.stderr))),
+        _ => Ok(()),
+    }
 }
 
 /// Adds the include for dm-manager's file to the end of niri's main config.
@@ -832,6 +990,87 @@ cursor {
         // Again: replaces, doesn't duplicate.
         own.rebind_spawn("Mod+T", bind, "foot").unwrap();
         assert_eq!(own.text().matches("Mod+T").count(), 1);
+    }
+
+    #[test]
+    fn binds_from_files() {
+        let main = "binds {\n    Mod+T hotkey-overlay-title=\"Terminal\" { spawn \"kitty\"; }\n    Mod+Q repeat=false { close-window; }\n}\ninclude optional=true \"dm-manager.kdl\"\n";
+        let own = "binds {\n    Mod+T { spawn \"foot\"; }\n}\n";
+        let c = effective_of(&[("config.kdl", main), (FILE_NAME, own)]);
+        let t = &c.binds["Mod+T"];
+        assert_eq!((t.action.as_str(), t.own), (r#"spawn "foot""#, true));
+        assert_eq!(t.overrides.as_ref().map(|(_, a)| a.as_str()), Some(r#"spawn "kitty""#));
+        let q = &c.binds["Mod+Q"];
+        assert_eq!((q.action.as_str(), q.repeat, q.own, q.overrides.is_none()), ("close-window", false, false, true));
+    }
+
+    #[test]
+    fn writes_and_removes_own_binds() {
+        let mut own = NiriFile { path: PathBuf::from("/nonexistent"), file: KdlText::parse_v1(HEADER.into()).unwrap() };
+        let spec = |key: &str, action: &str| crate::binds::BindSpec {
+            key: key.into(),
+            action: action.into(),
+            title: None,
+            repeat: true,
+            allow_when_locked: false,
+        };
+        own.set_bind(None, &spec("Mod+T", r#"spawn "kitty""#)).unwrap();
+        own.set_bind(None, &spec("Mod+E", r#"spawn "dolphin""#)).unwrap();
+        assert!(
+            own.text().ends_with("binds {\n    Mod+T { spawn \"kitty\"; }\n    Mod+E { spawn \"dolphin\"; }\n}\n"),
+            "{}",
+            own.text()
+        );
+        // Editing changes the key: the old one goes.
+        own.set_bind(Some("Mod+T"), &spec("Mod+Return", r#"spawn "kitty""#)).unwrap();
+        assert!(!own.text().contains("Mod+T "));
+        assert_eq!(own.text().matches("Mod+Return").count(), 1);
+        own.remove_bind("Mod+E").unwrap();
+        assert!(!own.text().contains("Mod+E"));
+    }
+
+    #[test]
+    fn comments_out_a_block() {
+        let text = "// mine\noutput \"eDP-1\" {\n    variable-refresh-rate\n}\n\nbinds {}\n";
+        let block = "output \"eDP-1\" {\n    variable-refresh-rate\n}";
+        let out = comment_out(text, block).unwrap();
+        assert_eq!(
+            out,
+            format!("// mine\n{MOVED}\n// output \"eDP-1\" {{\n//     variable-refresh-rate\n// }}\n\nbinds {{}}\n")
+        );
+        assert!(KdlText::parse_v1(out).is_ok());
+    }
+
+    #[test]
+    fn writes_outputs_keeping_extras() {
+        let mut own = NiriFile {
+            path: PathBuf::from("/nonexistent"),
+            file: KdlText::parse_v1("output \"eDP-1\" {\n    scale 2\n    focus-at-startup\n}\n".into()).unwrap(),
+        };
+        let settings = crate::outputs::Settings {
+            on: true,
+            mode: None,
+            scale: 1.5,
+            transform: crate::outputs::Transform::Normal,
+            x: 0,
+            y: 0,
+            vrr: false,
+        };
+        own.set_output("eDP-1", &settings).unwrap();
+        assert_eq!(
+            own.text(),
+            "output \"eDP-1\" {\n    scale 1.5\n    transform \"normal\"\n    position x=0 y=0\n    focus-at-startup\n}\n"
+        );
+    }
+
+    #[test]
+    fn first_output_block_applies() {
+        let main = "output \"eDP-1\" {\n    scale 1.25\n}\ninclude \"dm-manager.kdl\"\n";
+        let own = "output \"eDP-1\" {\n    scale 1.5\n}\noutput \"HDMI-A-1\" {\n    off\n}\n";
+        let c = effective_of(&[("config.kdl", main), (FILE_NAME, own)]);
+        assert_eq!(c.outputs.len(), 2);
+        assert!(!c.outputs[0].own && c.outputs[0].raw.contains("1.25"));
+        assert!(c.outputs[1].own && c.outputs[1].name == "HDMI-A-1");
     }
 
     #[test]

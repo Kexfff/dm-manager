@@ -6,6 +6,7 @@
 
 pub mod appearance;
 pub mod apps;
+pub mod binds;
 pub mod bluetooth;
 mod bus;
 pub mod dmsh;
@@ -14,6 +15,7 @@ pub mod ini;
 pub mod kdl_text;
 pub mod network;
 pub mod niri;
+pub mod outputs;
 pub mod palette;
 pub mod power;
 pub mod sysinfo;
